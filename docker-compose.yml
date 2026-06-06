@@ -1,0 +1,16 @@
+# docker-compose.yml
+services:
+  db:
+    image: pgvector/pgvector:pg16        # 官方 Postgres 16 镜像，已内置 pgvector 扩展
+    container_name: scribe_db
+    environment:
+      POSTGRES_USER: scribe
+      POSTGRES_PASSWORD: scribe_local_pw
+      POSTGRES_DB: scribe
+    ports:
+      - "5433:5432"                       # 5433 -> continer 5432
+    volumes:
+      - pgdata:/var/lib/postgresql/data   # 数据持久化，容器删了数据还在
+
+volumes:
+  pgdata:
