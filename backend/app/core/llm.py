@@ -1,16 +1,18 @@
 # app/core/llm.py
 #
-# 这一层把"如何调用大模型生成 SOAP"封装起来，对外只暴露一个异步生成器
-# generate_soap_stream(...)，它逐段 yield 文本增量（token）。
-# 路由层只管把这些增量包成 SSE 帧转发，不关心底层是 OpenAI 还是 mock。
+# 大模型封装层。对外暴露：
+#   generate_soap_stream(...)  —— 异步生成“事件”，每个事件是 dict：
+#        {"type":"text", "content":"..."}   文本增量
+#        {"type":"tool", "label":"..."}     工具被调用的提示（演示用）
+#   embed_text / embed_texts   —— 计算向量（ICD 搜索用）
+# 没配 OPENAI_API_KEY 时全部走 mock，方便本地把流水线跑通。
 import asyncio
+import json
 from collections.abc import AsyncIterator
 
 from app.core.config import settings
 
-# ── 输出格式契约 ────────────────────────────────────────────────────────────
-# 这段拼在每个模板的 system_prompt 后面，强制模型用固定的 ###段### 标记输出，
-# 这样前端才能可靠地把流式文本切分到四个分区。
+# ── 输出格式契约（拼在模板 system_prompt 后，强制分段）──────────────────────────
 OUTPUT_CONTRACT = """
 Format the clinical note using EXACTLY these section markers, each on its own line, in this order:
 ###SUBJECTIVE###
@@ -21,19 +23,33 @@ Format the clinical note using EXACTLY these section markers, each on its own li
 Rules:
 - In the ASSESSMENT section, include at least one relevant ICD-10 code on its own line,
   formatted as: - <CODE>: <description>
-- Base the note ONLY on the transcript. Never invent clinical facts.
+- If prior patient history is provided via the get_patient_history tool, reference relevant
+  prior diagnoses or treatments where clinically appropriate.
+- Base the note ONLY on the transcript and any provided history. Never invent clinical facts.
   Write "Not documented." where information is missing.
 - If the transcript contains no clinically meaningful content, output ONLY:
 ###INSUFFICIENT###
 <one short sentence explaining why>
 """.strip()
 
-# 默认人设：当某次就诊没有选模板时兜底用它。
 DEFAULT_PERSONA = "You are an experienced clinical documentation specialist."
+
+# function calling 的工具定义：让模型可以“请求”患者历史。
+# 注意参数为空——患者身份后端已知，模型无需（也不能）指定查谁，避免越权。
+HISTORY_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "get_patient_history",
+        "description": (
+            "Retrieve this patient's prior encounter notes (assessments and plans) "
+            "to inform the current note. Use this for returning patients."
+        ),
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+}
 
 
 def _build_messages(template_prompt: str | None, transcript: str, patient) -> list[dict]:
-    """把模板提示 + 输出契约 + 患者信息 + 转录，组装成 OpenAI 的 messages。"""
     system = (template_prompt or DEFAULT_PERSONA) + "\n\n" + OUTPUT_CONTRACT
     user = (
         f"Patient: {patient.first_name} {patient.last_name}, DOB {patient.dob}.\n\n"
@@ -45,7 +61,7 @@ def _build_messages(template_prompt: str | None, transcript: str, patient) -> li
     ]
 
 
-# 进程内只创建一次 OpenAI 客户端（有 key 时）。没配 key 就走 mock。
+# 进程内只建一次客户端。没 key 就为 None → 走 mock。
 _client = None
 if settings.openai_api_key:
     from openai import AsyncOpenAI
@@ -53,53 +69,69 @@ if settings.openai_api_key:
 
 
 async def generate_soap_stream(
-    template_prompt: str | None, transcript: str, patient
-) -> AsyncIterator[str]:
-    """异步生成器：逐段产出 SOAP 文本增量。"""
-    if _client is None:
-        # 没配 OPENAI_API_KEY → 走本地 mock，方便先把整条流水线跑通
-        async for delta in _mock_stream(transcript):
-            yield delta
-        return
+    template_prompt: str | None,
+    transcript: str,
+    patient,
+    fetch_history,   # async callable () -> list[dict]，由路由层注入（查 RDS）
+    has_history: bool,
+) -> AsyncIterator[dict]:
+    """逐个产出事件 dict。"""
+    # if _client is None:
+    #     async for ev in _mock_stream(transcript, fetch_history, has_history):
+    #         yield ev
+    #     return
 
     messages = _build_messages(template_prompt, transcript, patient)
+
+    # ── Phase A：复诊患者，强制调用历史工具 ──────────────────────────────────
+    if has_history:
+        first = await _client.chat.completions.create(
+            model="gpt-4o",
+            messages=messages,
+            tools=[HISTORY_TOOL],
+            tool_choice={"type": "function", "function": {"name": "get_patient_history"}},
+        )
+        msg = first.choices[0].message
+        if msg.tool_calls:
+            tc = msg.tool_calls[0]
+            history = await fetch_history()                 # ← 真去 RDS 查
+            yield {"type": "tool",
+                   "label": f"get_patient_history → 取回 {len(history)} 条既往就诊"}
+            # 把“模型的工具调用”和“工具返回结果”回灌进对话，让 Phase B 能用上
+            messages.append({
+                "role": "assistant",
+                "content": msg.content,
+                "tool_calls": [{
+                    "id": tc.id, "type": "function",
+                    "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+                }],
+            })
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tc.id,
+                "content": json.dumps(history),
+            })
+
+    # ── Phase B：流式产出 SOAP ───────────────────────────────────────────────
     stream = await _client.chat.completions.create(
-        model="gpt-4o",
-        messages=messages,
-        stream=True,        # 关键：开启流式
-        temperature=0.2,    # 临床文档要稳定、可复现，不要发散
+        model="gpt-4o", messages=messages, stream=True, temperature=0.2,
     )
     async for chunk in stream:
         delta = chunk.choices[0].delta.content or ""
         if delta:
-            yield delta
+            yield {"type": "text", "content": delta}
 
 
-# ── Mock 模式 ───────────────────────────────────────────────────────────────
-# 没有 OpenAI key 时用它，把一段写死的 SOAP 按词逐个吐出，模拟真实流式手感。
-# 这样你能先验证：SSE 帧、前端逐字渲染、解析归段、保存、版本历史——全部走通。
-MOCK_SOAP = """###SUBJECTIVE###
-The patient is a 54-year-old male presenting with a 3-day history of productive cough, low-grade fever, and fatigue. He reports mild shortness of breath on exertion but denies chest pain or hemoptysis. No recent travel or sick contacts.
-
-###OBJECTIVE###
-Vitals: T 38.1C, HR 92, BP 128/80, RR 18, SpO2 96% on room air. Lungs with scattered rhonchi in the right lower field, no wheezing. Heart regular rate and rhythm. No peripheral edema.
-
-###ASSESSMENT###
-Acute bronchitis, likely viral, with no clinical signs of pneumonia at this time.
-- J20.9: Acute bronchitis, unspecified
-- R05.9: Cough, unspecified
-
-###PLAN###
-Supportive care with rest and increased oral fluids. Guaifenesin for symptomatic relief. Return precautions discussed for worsening dyspnea, high fever, or chest pain. Follow up in 7 days if symptoms persist."""
+# ── 向量（ICD 搜索用）────────────────────────────────────────────────────────
+async def embed_text(text: str) -> list[float] | None:
+    if _client is None:
+        return None
+    r = await _client.embeddings.create(model="text-embedding-3-small", input=text)
+    return r.data[0].embedding
 
 
-async def _mock_stream(transcript: str) -> AsyncIterator[str]:
-    # 转录太短/为空 → 触发"内容不足"分支（Phase 5 边界场景的预演）
-    if len((transcript or "").strip()) < 20:
-        text = ("###INSUFFICIENT###\n"
-                "The transcript does not contain enough clinical information to generate a note.")
-    else:
-        text = MOCK_SOAP
-    for word in text.split(" "):
-        yield word + " "
-        await asyncio.sleep(0.02)   # 制造逐字流式的视觉效果
+async def embed_texts(texts: list[str]) -> list[list[float]] | None:
+    if _client is None:
+        return None
+    r = await _client.embeddings.create(model="text-embedding-3-small", input=texts)
+    return [d.embedding for d in r.data]

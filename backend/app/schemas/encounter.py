@@ -14,3 +14,8 @@ class EncounterCreate(BaseModel):
 
 class GenerateRequest(BaseModel):
     transcript: str
+
+
+class DraftSave(BaseModel):
+    transcript: str | None = None
+    working_note: dict | None = None

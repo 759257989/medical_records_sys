@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     jwt_secret: str = "dev-only-change-me"   # 上线务必换成长随机串
     jwt_expire_hours: int = 8
 
-    openai_api_key: str = ""                 # 后续 Phase 用
+    openai_api_key: str = ""                 # 从 .env 读取，不要在此处填写真实 Key
     environment: str = "local"               # local / aws
 
 
