@@ -1,26 +1,29 @@
 // frontend/src/api/stream.ts
-// 用 fetch + ReadableStream 消费后端的 SSE 流。
-// 为什么不用我们已有的 axios（client.ts）？因为浏览器里的 axios 不擅长“边下边读”响应体，
-// 而 fetch 的 res.body.getReader() 天生支持流式读取。所以这里单独写一个。
+// 消费后端 SSE“事件流”。每帧是 {type, ...}：
+//   {type:"text", content}  正文增量
+//   {type:"tool", label}    工具被调用提示
+//   {type:"error", message} 出错
+//   {type:"done"}           结束
+
+type StreamHandlers = {
+  onText: (fullText: string) => void;     // 传累积全文
+  onTool?: (label: string) => void;       // 工具调用提示
+};
 
 export async function streamSoap(
   encounterId: string,
   transcript: string,
-  onText: (fullText: string) => void,   // 每收到新内容就回调一次（传累积全文）
+  handlers: StreamHandlers,
 ): Promise<void> {
   const token = localStorage.getItem("token");
 
   const res = await fetch(`/api/encounters/${encounterId}/generate`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,   // 手动带 token（fetch 不走 axios 拦截器）
-    },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify({ transcript }),
   });
 
-  // 因为绕过了 axios 拦截器，这里要自己处理 401（会话过期）
-  if (res.status === 401) {
+  if (res.status === 401) {        // fetch 不走 axios 拦截器，手动处理会话过期
     localStorage.removeItem("token");
     location.href = "/login";
     return;
@@ -29,27 +32,24 @@ export async function streamSoap(
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
-  let buffer = "";   // 存放还没凑齐成完整帧的残片
-  let full = "";     // 累积的全文
+  let buffer = "";
+  let full = "";
 
   for (;;) {
     const { value, done } = await reader.read();
     if (done) break;
-
     buffer += decoder.decode(value, { stream: true });
-    const frames = buffer.split("\n\n");   // SSE 帧以空行分隔
-    buffer = frames.pop() ?? "";           // 最后一段可能不完整，留到下次
+    const frames = buffer.split("\n\n");
+    buffer = frames.pop() ?? "";   // 残片留到下次
 
     for (const frame of frames) {
       const line = frame.trim();
       if (!line.startsWith("data:")) continue;
-      const payload = JSON.parse(line.slice(5).trim());
-      if (payload.error) throw new Error(payload.error);
-      if (payload.t) {
-        full += payload.t;
-        onText(full);    // 把累积全文交给页面去解析渲染
-      }
-      // payload.done 时自然走到流结束
+      const ev = JSON.parse(line.slice(5).trim());
+      if (ev.type === "error") throw new Error(ev.message);
+      if (ev.type === "tool") handlers.onTool?.(ev.label);
+      if (ev.type === "text") { full += ev.content; handlers.onText(full); }
+      // ev.type === "done" 时循环自然结束
     }
   }
 }

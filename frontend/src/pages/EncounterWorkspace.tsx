@@ -1,23 +1,25 @@
 // frontend/src/pages/EncounterWorkspace.tsx
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/client";
 import { streamSoap } from "../api/stream";
 import { EMPTY_SOAP, parseSoap, type Soap } from "../lib/soap";
 import { useAuth } from "../auth/AuthContext";
 
 type Template = { id: string; name: string; encounter_type: string | null };
-type Encounter = { id: string; is_returning: boolean; patient: { first_name: string; last_name: string; dob: string } };
+type Patient = { first_name: string; last_name: string; dob: string };
+type Encounter = { id: string; is_returning: boolean; patient: Patient };
 type Version = { version_no: number; created_at: string; author_name: string } & Soap;
+type IcdHit = { code: string; description: string; score: number | null };
 
 export default function EncounterWorkspace() {
   const { user, logout } = useAuth();
+  const [params] = useSearchParams();
+  const resumeId = params.get("id");   // 带 ?id= 表示恢复某条草稿
 
-  // ── 步骤1：新建就诊表单 ──
   const [templates, setTemplates] = useState<Template[]>([]);
   const [form, setForm] = useState({ first_name: "", last_name: "", dob: "", template_id: "" });
 
-  // ── 步骤2：工作区状态 ──
   const [encounter, setEncounter] = useState<Encounter | null>(null);
   const [transcript, setTranscript] = useState("");
   const [soap, setSoap] = useState<Soap>(EMPTY_SOAP);
@@ -25,31 +27,75 @@ export default function EncounterWorkspace() {
   const [saving, setSaving] = useState(false);
   const [versions, setVersions] = useState<Version[]>([]);
   const [toast, setToast] = useState("");
+  const [toolNotice, setToolNotice] = useState("");   // 历史注入提示
+  const [draftSaved, setDraftSaved] = useState("");    // 草稿保存时间
 
-  // 进页面先拉模板列表
+  // ICD 搜索
+  const [icdQuery, setIcdQuery] = useState("");
+  const [icdHits, setIcdHits] = useState<IcdHit[]>([]);
+
+  const flash = (m: string) => { setToast(m); setTimeout(() => setToast(""), 2500); };
+
+  // 进页面拉模板
   useEffect(() => {
     api.get<Template[]>("/templates").then((r) => setTemplates(r.data)).catch(() => {});
   }, []);
 
-  const flash = (msg: string) => { setToast(msg); setTimeout(() => setToast(""), 2500); };
+  // 恢复草稿（?id=）
+  useEffect(() => {
+    if (!resumeId) return;
+    api.get(`/encounters/${resumeId}`).then((r) => {
+      const e = r.data;
+      setEncounter({ id: e.id, is_returning: e.is_returning, patient: e.patient });
+      setTranscript(e.transcript || "");
+      const wn = e.working_note || {};
+      setSoap({
+        subjective: wn.subjective || "", objective: wn.objective || "",
+        assessment: wn.assessment || "", plan: wn.plan || "",
+      });
+      fetchVersions(e.id);
+    }).catch(() => flash("无法恢复该草稿"));
+  }, [resumeId]);
 
-  // 新建就诊
+  // 草稿 autosave：transcript/soap 变化后防抖 1s 存服务端（生成中不存）
+  const timer = useRef<number | null>(null);
+  useEffect(() => {
+    if (!encounter || generating) return;
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => {
+      api.put(`/encounters/${encounter.id}/draft`, { transcript, working_note: soap })
+        .then(() => setDraftSaved(new Date().toLocaleTimeString()))
+        .catch(() => {});
+    }, 1000);
+    return () => { if (timer.current) clearTimeout(timer.current); };
+  }, [transcript, soap, encounter, generating]);
+
+  // ICD 搜索：防抖 350ms
+  useEffect(() => {
+    const q = icdQuery.trim();
+    if (!q) { setIcdHits([]); return; }
+    const t = window.setTimeout(() => {
+      api.get<IcdHit[]>("/icd10/search", { params: { q } })
+        .then((r) => setIcdHits(r.data)).catch(() => setIcdHits([]));
+    }, 350);
+    return () => clearTimeout(t);
+  }, [icdQuery]);
+
   const startEncounter = async (e: React.FormEvent) => {
     e.preventDefault();
     const body = { ...form, template_id: form.template_id || null };
     const r = await api.post<Encounter>("/encounters", body);
-    setEncounter(r.data);
-    setSoap(EMPTY_SOAP);
-    setVersions([]);
+    setEncounter(r.data); setSoap(EMPTY_SOAP); setVersions([]); setTranscript("");
   };
 
-  // 生成 SOAP（流式）
   const generate = async () => {
     if (!encounter || !transcript.trim()) return;
-    setGenerating(true);
-    setSoap(EMPTY_SOAP);
+    setGenerating(true); setSoap(EMPTY_SOAP); setToolNotice("");
     try {
-      await streamSoap(encounter.id, transcript, (full) => setSoap(parseSoap(full)));
+      await streamSoap(encounter.id, transcript, {
+        onText: (full) => setSoap(parseSoap(full)),
+        onTool: (label) => setToolNotice(label),
+      });
     } catch (err) {
       flash("生成失败：" + (err as Error).message);
     } finally {
@@ -57,14 +103,13 @@ export default function EncounterWorkspace() {
     }
   };
 
-  // 保存版本
   const save = async () => {
     if (!encounter) return;
     setSaving(true);
     try {
       const r = await api.post(`/encounters/${encounter.id}/notes`, soap);
       flash(`已保存 V${r.data.version_no}`);
-      await loadVersions();
+      await fetchVersions(encounter.id);
     } catch {
       flash("保存失败");
     } finally {
@@ -72,17 +117,21 @@ export default function EncounterWorkspace() {
     }
   };
 
-  const loadVersions = async () => {
-    if (!encounter) return;
-    const r = await api.get<Version[]>(`/encounters/${encounter.id}/notes`);
+  const fetchVersions = async (id: string) => {
+    const r = await api.get<Version[]>(`/encounters/${id}/notes`);
     setVersions(r.data);
   };
 
-  // 点历史版本 → 载入编辑区查看
   const viewVersion = (v: Version) =>
     setSoap({ subjective: v.subjective, objective: v.objective, assessment: v.assessment, plan: v.plan });
 
-  // ── 渲染：未建就诊时显示表单 ──
+  const appendIcd = (hit: IcdHit) =>
+    setSoap((s) => ({
+      ...s,
+      assessment: (s.assessment ? s.assessment + "\n" : "") + `- ${hit.code}: ${hit.description}`,
+    }));
+
+  // ── 未建/未恢复就诊：表单 ──
   if (!encounter) {
     return (
       <div className="page">
@@ -109,14 +158,13 @@ export default function EncounterWorkspace() {
     );
   }
 
-  // ── 渲染：工作区 ──
   const p = encounter.patient;
   return (
     <div className="page">
       <Topbar user={user} logout={logout} />
       {toast && <div className="toast">{toast}</div>}
       <main className="workspace">
-        {/* 左栏：转录输入 */}
+        {/* 左栏：转录 */}
         <section className="panel">
           <div className="panel-head">
             <h3>转录 / 临床观察</h3>
@@ -125,14 +173,17 @@ export default function EncounterWorkspace() {
               {encounter.is_returning && <em className="returning"> 复诊</em>}
             </span>
           </div>
-          <textarea className="transcript" rows={18} placeholder="粘贴就诊转录或自由书写临床观察…"
+          <textarea className="transcript" rows={16} placeholder="粘贴就诊转录或自由书写临床观察…"
             value={transcript} onChange={(e) => setTranscript(e.target.value)} />
-          <button className="primary" disabled={generating || !transcript.trim()} onClick={generate}>
-            {generating ? "生成中…" : "Generate Note"}
-          </button>
+          <div className="row-between">
+            <button className="primary" disabled={generating || !transcript.trim()} onClick={generate}>
+              {generating ? "生成中…" : "Generate Note"}
+            </button>
+            {draftSaved && <span className="muted">草稿已保存 {draftSaved}</span>}
+          </div>
         </section>
 
-        {/* 中栏：SOAP 编辑区 */}
+        {/* 中栏：SOAP + ICD 控件 */}
         <section className="panel">
           <div className="panel-head">
             <h3>SOAP 笔记</h3>
@@ -140,6 +191,8 @@ export default function EncounterWorkspace() {
               {saving ? "保存中…" : "Save"}
             </button>
           </div>
+
+          {toolNotice && <div className="tool-notice">🔍 {toolNotice}（已注入既往史）</div>}
 
           {soap.insufficient ? (
             <div className="insufficient">⚠️ 转录中未发现足够的临床信息：{soap.insufficient}</div>
@@ -155,6 +208,24 @@ export default function EncounterWorkspace() {
                 onChange={(v) => setSoap({ ...soap, plan: v })} />
             </div>
           )}
+
+          {/* ICD-10 搜索控件 */}
+          <div className="icd">
+            <label>ICD-10 搜索（输入英文症状/诊断）</label>
+            <input placeholder="e.g. shortness of breath on exertion"
+              value={icdQuery} onChange={(e) => setIcdQuery(e.target.value)} />
+            {icdHits.length > 0 && (
+              <ul className="icd-hits">
+                {icdHits.map((h) => (
+                  <li key={h.code} onClick={() => appendIcd(h)} title="点击加入 Assessment">
+                    <code>{h.code}</code>
+                    <span>{h.description}</span>
+                    {h.score != null && <em>{h.score}</em>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </section>
 
         {/* 右栏：版本历史 */}
@@ -176,7 +247,6 @@ export default function EncounterWorkspace() {
   );
 }
 
-// 顶栏（复用 Dashboard 同款）
 function Topbar({ user, logout }: { user: any; logout: () => void }) {
   const nav = useNavigate();
   return (
@@ -188,7 +258,6 @@ function Topbar({ user, logout }: { user: any; logout: () => void }) {
   );
 }
 
-// 单个可编辑 SOAP 分区
 function SoapBox({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
   return (
     <div className="soap-box">
