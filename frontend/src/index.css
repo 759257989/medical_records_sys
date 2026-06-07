@@ -11,3 +11,37 @@ body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
 .topbar span { margin-left: auto; color: #475569; font-size: 14px; }
 .topbar button { padding: 6px 12px; border: 1px solid #cbd5e1; background: #fff; border-radius: 6px; cursor: pointer; }
 .content { padding: 24px; }
+
+/* ── Phase 2 工作区样式 ───────────────────────────────────────────────── */
+.primary { padding: 9px 16px; background: #1d4ed8; color: #fff; border: 0; border-radius: 6px; cursor: pointer; font-size: 14px; }
+.primary:disabled { background: #94a3b8; cursor: not-allowed; }
+.muted { color: #64748b; font-size: 13px; }
+.card.wide { width: 520px; }
+.card .row { display: flex; gap: 10px; }
+.card .row input { flex: 1; }
+.card select { padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; }
+
+.toast { position: fixed; top: 64px; right: 20px; background: #0f172a; color: #fff; padding: 10px 16px; border-radius: 6px; font-size: 14px; z-index: 50; }
+
+/* 三栏工作区 */
+.workspace { display: grid; grid-template-columns: 1fr 1.2fr 260px; gap: 16px; padding: 16px 20px; align-items: start; }
+.panel { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px; }
+.panel.narrow { min-width: 0; }
+.panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.panel-head h3 { font-size: 14px; margin: 0; color: #334155; }
+.patient-chip { font-size: 12px; color: #475569; }
+.returning { color: #b45309; font-style: normal; font-weight: 600; }
+
+.transcript { width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; font: 13px/1.5 ui-monospace, monospace; resize: vertical; margin-bottom: 10px; }
+
+.soap { display: flex; flex-direction: column; gap: 12px; }
+.soap-box label { display: block; font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 4px; }
+.soap-box textarea { width: 100%; padding: 9px; border: 1px solid #cbd5e1; border-radius: 6px; font: 13px/1.5 system-ui, sans-serif; resize: vertical; }
+
+.insufficient { padding: 14px; background: #fffbeb; border: 1px solid #fcd34d; border-radius: 8px; color: #92400e; font-size: 14px; }
+
+.versions { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.versions li { display: grid; grid-template-columns: 36px 1fr; row-gap: 2px; padding: 8px 10px; border: 1px solid #e2e8f0; border-radius: 6px; cursor: pointer; font-size: 12px; }
+.versions li:hover { border-color: #1d4ed8; background: #f8fafc; }
+.versions li strong { grid-row: span 2; align-self: center; color: #1d4ed8; }
+.versions time { color: #94a3b8; }
