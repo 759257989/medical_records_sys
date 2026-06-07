@@ -4,16 +4,42 @@ import { useNavigate } from "react-router-dom";
 import api from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 
-type Draft = { id: string; patient_name: string; dob: string; status: string; updated_at: string };
+type Enc = {
+  id: string;
+  patient_name: string;
+  dob: string;
+  status: string;
+  updated_at: string;
+  version_count: number;
+};
 
 export default function DashboardPage() {
   const { user, logout } = useAuth();
   const nav = useNavigate();
-  const [drafts, setDrafts] = useState<Draft[]>([]);
+  const [items, setItems] = useState<Enc[]>([]);
 
   useEffect(() => {
-    api.get<Draft[]>("/encounters/mine").then((r) => setDrafts(r.data)).catch(() => {});
+    api.get<Enc[]>("/encounters/mine").then((r) => setItems(r.data)).catch(() => {});
   }, []);
+
+  const drafts = items.filter((e) => e.status !== "finalized");   // 未完成（可继续）
+  const done = items.filter((e) => e.status === "finalized");      // 已完成（可查看/续写）
+
+  const renderList = (list: Enc[], cta: string) => (
+    <ul className="draft-list">
+      {list.map((e) => (
+        <li key={e.id}>
+          <div>
+            <strong>{e.patient_name}</strong> · {e.dob}
+            <span className="badge">{e.status}</span>
+            {e.version_count > 0 && <span className="badge">{e.version_count} 版本</span>}
+          </div>
+          <div className="muted">更新于 {new Date(e.updated_at).toLocaleString()}</div>
+          <button onClick={() => nav(`/encounter?id=${e.id}`)}>{cta} →</button>
+        </li>
+      ))}
+    </ul>
+  );
 
   return (
     <div className="page">
@@ -27,21 +53,16 @@ export default function DashboardPage() {
         <button className="primary" onClick={() => nav("/encounter")}>+ 新建就诊</button>
 
         <h3 style={{ marginTop: 24 }}>未完成的就诊（可继续）</h3>
-        {drafts.length === 0 && <p className="muted">没有未完成的草稿。</p>}
-        <ul className="draft-list">
-          {drafts.map((d) => (
-            <li key={d.id}>
-              <div>
-                <strong>{d.patient_name}</strong> · {d.dob}
-                <span className="badge">{d.status}</span>
-              </div>
-              <div className="muted">更新于 {new Date(d.updated_at).toLocaleString()}</div>
-              <button onClick={() => nav(`/encounter?id=${d.id}`)}>继续 →</button>
-            </li>
-          ))}
-        </ul>
+        {drafts.length === 0 ? <p className="muted">没有未完成的草稿。</p> : renderList(drafts, "继续")}
 
-        {user?.role === "admin" && <p className="muted">（你是管理员，Phase 4 将有管理后台入口。）</p>}
+        <h3 style={{ marginTop: 24 }}>已完成的就诊（可查看版本历史 / 续写）</h3>
+        {done.length === 0 ? <p className="muted">还没有已完成的就诊。</p> : renderList(done, "打开")}
+
+        {user?.role === "admin" && (
+          <p style={{ marginTop: 24 }}>
+            <button className="primary" onClick={() => nav("/admin")}>进入管理后台 →</button>
+          </p>
+        )}
       </main>
     </div>
   );

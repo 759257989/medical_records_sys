@@ -23,10 +23,11 @@ export async function streamSoap(
     body: JSON.stringify({ transcript }),
   });
 
-  if (res.status === 401) {        // fetch 不走 axios 拦截器，手动处理会话过期
+    if (res.status === 401) {        // fetch 不走 axios 拦截器，这里手动对齐同一套逻辑
+    // 同样【不硬跳转】，广播事件让 AuthContext 弹就地重登，保住正在编辑的转录/草稿
     localStorage.removeItem("token");
-    location.href = "/login";
-    return;
+    window.dispatchEvent(new CustomEvent("session-expired"));
+    throw new Error("会话已过期，请重新登录");
   }
   if (!res.ok || !res.body) throw new Error(`generate failed: ${res.status}`);
 

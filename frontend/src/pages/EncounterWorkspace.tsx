@@ -16,6 +16,7 @@ export default function EncounterWorkspace() {
   const { user, logout } = useAuth();
   const [params] = useSearchParams();
   const resumeId = params.get("id");   // 带 ?id= 表示恢复某条草稿
+  const nav = useNavigate();
 
   const [templates, setTemplates] = useState<Template[]>([]);
   const [form, setForm] = useState({ first_name: "", last_name: "", dob: "", template_id: "" });
@@ -41,20 +42,31 @@ export default function EncounterWorkspace() {
     api.get<Template[]>("/templates").then((r) => setTemplates(r.data)).catch(() => {});
   }, []);
 
-  // 恢复草稿（?id=）
+  // 恢复就诊（?id=）：草稿回填编辑区；若已完成且草稿为空，则回填最新保存版本
   useEffect(() => {
     if (!resumeId) return;
-    api.get(`/encounters/${resumeId}`).then((r) => {
+    api.get(`/encounters/${resumeId}`).then(async (r) => {
       const e = r.data;
       setEncounter({ id: e.id, is_returning: e.is_returning, patient: e.patient });
       setTranscript(e.transcript || "");
       const wn = e.working_note || {};
-      setSoap({
+      const wnSoap: Soap = {
         subjective: wn.subjective || "", objective: wn.objective || "",
         assessment: wn.assessment || "", plan: wn.plan || "",
-      });
-      fetchVersions(e.id);
-    }).catch(() => flash("无法恢复该草稿"));
+      };
+      const vr = await api.get<Version[]>(`/encounters/${e.id}/notes`);
+      setVersions(vr.data);
+      const empty = !wnSoap.subjective && !wnSoap.objective && !wnSoap.assessment && !wnSoap.plan;
+      if (empty && vr.data.length > 0) {
+        const v = vr.data[0];   // 最新版本（列表按版本号倒序）
+        setSoap({
+          subjective: v.subjective || "", objective: v.objective || "",
+          assessment: v.assessment || "", plan: v.plan || "",
+        });
+      } else {
+        setSoap(wnSoap);
+      }
+    }).catch(() => flash("无法恢复该就诊"));
   }, [resumeId]);
 
   // 草稿 autosave：transcript/soap 变化后防抖 1s 存服务端（生成中不存）
@@ -229,8 +241,13 @@ export default function EncounterWorkspace() {
         </section>
 
         {/* 右栏：版本历史 */}
-        <aside className="panel narrow">
-          <div className="panel-head"><h3>版本历史</h3></div>
+         <aside className="panel narrow">
+          <div className="panel-head">
+            <h3>版本历史</h3>
+            {versions.length >= 2 && (
+              <button onClick={() => nav(`/diff?id=${encounter.id}`)}>对比</button>
+            )}
+          </div>
           {versions.length === 0 && <p className="muted">尚无保存版本</p>}
           <ul className="versions">
             {versions.map((v) => (

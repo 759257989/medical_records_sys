@@ -9,6 +9,7 @@ from app.core.db import engine, get_db
 from app.api.encounters import router as encounters_router   
 from app.api.templates import router as templates_router     
 from app.api.icd import router as icd_router
+from app.api.admin import router as admin_router
 
 
 @asynccontextmanager
@@ -24,6 +25,7 @@ app.include_router(auth_router)
 app.include_router(encounters_router) 
 app.include_router(templates_router)  
 app.include_router(icd_router)
+app.include_router(admin_router)
 
 
 

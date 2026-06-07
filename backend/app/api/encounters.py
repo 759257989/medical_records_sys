@@ -98,19 +98,32 @@ async def create_encounter(
     }
 
 
-# ── “我的未完成就诊”列表（供 Dashboard 恢复用）★ 必须放在 /{encounter_id} 之前 ──
+# ── “我的就诊”列表（草稿 + 已完成，供 Dashboard 恢复/查看用）★ 必须放在 /{encounter_id} 之前 ──
 @router.get("/mine")
 async def my_encounters(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    # 每个就诊的版本数（区分“已有保存内容”的笔记）
+    vc = (
+        select(NoteVersion.encounter_id, func.count().label("vc"))
+        .group_by(NoteVersion.encounter_id)
+        .subquery()
+    )
     rows = (
         await db.execute(
-            select(Encounter, Patient.first_name, Patient.last_name, Patient.dob)
+            select(
+                Encounter,
+                Patient.first_name,
+                Patient.last_name,
+                Patient.dob,
+                func.coalesce(vc.c.vc, 0),
+            )
             .join(Patient, Encounter.patient_id == Patient.id)
-            .where(Encounter.provider_id == user.id, Encounter.status != "finalized")
+            .outerjoin(vc, vc.c.encounter_id == Encounter.id)
+            .where(Encounter.provider_id == user.id)   # 返回该医生的全部就诊（含已完成）
             .order_by(Encounter.updated_at.desc())
-            .limit(20)
+            .limit(50)
         )
     ).all()
     return [
@@ -119,8 +132,9 @@ async def my_encounters(
             "updated_at": e.updated_at.isoformat(),
             "patient_name": f"{fn} {ln}", "dob": str(dob),
             "has_transcript": bool(e.transcript),
+            "version_count": int(version_count),
         }
-        for (e, fn, ln, dob) in rows
+        for (e, fn, ln, dob, version_count) in rows
     ]
 
 
