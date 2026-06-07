@@ -6,6 +6,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.auth import router as auth_router 
 from app.core.db import engine, get_db
+from app.api.encounters import router as encounters_router   
+from app.api.templates import router as templates_router     
 
 
 @asynccontextmanager
@@ -18,6 +20,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="AI Clinical Scribe", lifespan=lifespan)
 app.include_router(auth_router)    
+app.include_router(encounters_router) 
+app.include_router(templates_router)  
 
 
 @app.get("/api/health")

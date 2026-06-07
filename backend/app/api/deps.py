@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.db import get_db
+from app.models.encounter import Encounter
 from app.models.user import User
 
 # OAuth2PasswordBearer 是一个"令牌提取器"：
@@ -50,3 +51,21 @@ def require_admin(user: User = Depends(get_current_user)) -> User:
     if user.role != "admin":
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="admin_required")
     return user
+
+async def get_owned_encounter(
+    encounter_id: uuid.UUID,                       # 来自 URL 路径 /encounters/{encounter_id}/...
+    user: User = Depends(get_current_user),        # 先认证（复用第一级防线）
+    db: AsyncSession = Depends(get_db),
+) -> Encounter:
+    """取出指定 encounter，并强制"归属校验"：
+    - provider 只能访问自己的 encounter；
+    - admin 可以访问任何人的（为 Phase 4 全局视图铺路）。
+    校验在后端完成，不依赖前端隐藏，满足 AUTH-3。
+    """
+    enc = await db.get(Encounter, encounter_id)
+    if enc is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="encounter_not_found")
+    if user.role != "admin" and enc.provider_id != user.id:
+        # 注意：越权返回 403。也可返回 404 以不暴露资源是否存在，这里用 403 更直观。
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="forbidden")
+    return enc
