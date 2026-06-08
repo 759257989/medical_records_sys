@@ -7,7 +7,7 @@ type AuthCtx = {
   user: User | null;
   loading: boolean;
   sessionExpired: boolean;                                   // ← 新增
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<User>;
   logout: () => void;
 };
 
@@ -37,11 +37,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("session-expired", onExpired);
   }, []);
 
-  const login = async (email: string, password: string) => {
+  const login = async (email: string, password: string): Promise<User> => {
     const r = await api.post("/auth/login", { email, password });
     localStorage.setItem("token", r.data.access_token);
     setUser(r.data.user);
     setSessionExpired(false);   // 重登成功 → 关闭过期态 → 弹窗自动消失
+    return r.data.user as User;
   };
 
   const logout = () => { localStorage.removeItem("token"); setUser(null); setSessionExpired(false); };

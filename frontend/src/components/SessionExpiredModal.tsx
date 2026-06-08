@@ -4,29 +4,29 @@ import { useAuth } from "../auth/AuthContext";
 
 export default function SessionExpiredModal() {
   const { user, sessionExpired, login } = useAuth();
-  const [email, setEmail] = useState(user?.email ?? "");   // 预填邮箱，医生只需补密码
+  const [email, setEmail] = useState(user?.email ?? "");   // prefill email; provider only needs the password
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
-  // 只有【已登录用户】会话中途失效时才弹（目的：保住其内存里的未保存内容）。
-  // 未登录场景（如首次加载 token 失效）user 为 null，交给 ProtectedRoute 跳登录页即可。
+  // Only show when a logged-in user's session lapses mid-work (to preserve their unsaved content).
+  // If there is no user (e.g. an invalid token on first load), ProtectedRoute handles the redirect.
   if (!sessionExpired || !user) return null;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(""); setBusy(true);
     try {
-      // 成功后 AuthContext 把 sessionExpired 置 false → 本弹窗 return null 自动消失，
-      // 而 EncounterWorkspace 自始至终没被卸载，其 SOAP 草稿原样保留。
+      // On success, AuthContext sets sessionExpired=false → this modal unmounts itself,
+      // while the workspace was never unmounted, so the SOAP draft is preserved intact.
       await login(email, password);
     } catch (err: any) {
       const detail = err?.response?.data?.detail;
       if (err?.response?.status === 403 || detail === "account_inactive") {
-        // EDGE-3：被管理员停用
-        setError("此账号已被管理员停用，请联系管理员。你已录入的内容仍在本机，未丢失。");
+        // EDGE-3: account deactivated by an admin
+        setError("This account has been deactivated. Please contact your administrator. Your work is still saved locally and has not been lost.");
       } else {
-        setError("邮箱或密码不正确，请重试。");
+        setError("Email or password is incorrect. Please try again.");
       }
     } finally {
       setBusy(false);
@@ -36,10 +36,10 @@ export default function SessionExpiredModal() {
   return (
     <div className="modal-backdrop">
       <div className="modal">
-        <h2>会话已过期</h2>
+        <h2>Session expired</h2>
         <p className="muted">
-          为保护数据安全，登录状态已失效。<strong>你正在编辑的内容没有丢失</strong>——
-          重新登录后即可继续保存。
+          Your session has ended for security. <strong>Your work has not been lost</strong> —
+          sign in again to continue saving.
         </p>
         <form onSubmit={submit}>
           <input placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
@@ -47,7 +47,7 @@ export default function SessionExpiredModal() {
             onChange={(e) => setPassword(e.target.value)} />
           {error && <p className="error">{error}</p>}
           <button className="primary" type="submit" disabled={busy}>
-            {busy ? "登录中…" : "重新登录并继续"}
+            {busy ? "Signing in…" : "Sign in & continue"}
           </button>
         </form>
       </div>

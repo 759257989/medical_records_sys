@@ -15,7 +15,7 @@ type IcdHit = { code: string; description: string; score: number | null };
 export default function EncounterWorkspace() {
   const { user, logout } = useAuth();
   const [params] = useSearchParams();
-  const resumeId = params.get("id");   // 带 ?id= 表示恢复某条草稿
+  const resumeId = params.get("id");   // ?id= means resume an existing encounter
   const nav = useNavigate();
 
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -28,21 +28,22 @@ export default function EncounterWorkspace() {
   const [saving, setSaving] = useState(false);
   const [versions, setVersions] = useState<Version[]>([]);
   const [toast, setToast] = useState("");
-  const [toolNotice, setToolNotice] = useState("");   // 历史注入提示
-  const [draftSaved, setDraftSaved] = useState("");    // 草稿保存时间
+  const [toolNotice, setToolNotice] = useState("");      // prior-history injection notice
+  const [draftSaved, setDraftSaved] = useState("");       // last autosave time
+  const [savedOk, setSavedOk] = useState(false);          // post-save confirmation
 
-  // ICD 搜索
+  // ICD search
   const [icdQuery, setIcdQuery] = useState("");
   const [icdHits, setIcdHits] = useState<IcdHit[]>([]);
 
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast(""), 2500); };
 
-  // 进页面拉模板
+  // Load templates on mount
   useEffect(() => {
     api.get<Template[]>("/templates").then((r) => setTemplates(r.data)).catch(() => {});
   }, []);
 
-  // 恢复就诊（?id=）：草稿回填编辑区；若已完成且草稿为空，则回填最新保存版本
+  // Resume encounter (?id=): restore draft; if finalized and draft empty, load latest saved version
   useEffect(() => {
     if (!resumeId) return;
     api.get(`/encounters/${resumeId}`).then(async (r) => {
@@ -58,7 +59,7 @@ export default function EncounterWorkspace() {
       setVersions(vr.data);
       const empty = !wnSoap.subjective && !wnSoap.objective && !wnSoap.assessment && !wnSoap.plan;
       if (empty && vr.data.length > 0) {
-        const v = vr.data[0];   // 最新版本（列表按版本号倒序）
+        const v = vr.data[0];   // latest version (list is in descending order)
         setSoap({
           subjective: v.subjective || "", objective: v.objective || "",
           assessment: v.assessment || "", plan: v.plan || "",
@@ -66,10 +67,10 @@ export default function EncounterWorkspace() {
       } else {
         setSoap(wnSoap);
       }
-    }).catch(() => flash("无法恢复该就诊"));
+    }).catch(() => flash("Could not load this encounter"));
   }, [resumeId]);
 
-  // 草稿 autosave：transcript/soap 变化后防抖 1s 存服务端（生成中不存）
+  // Draft autosave: debounce 1s after transcript/soap changes (skip while generating)
   const timer = useRef<number | null>(null);
   useEffect(() => {
     if (!encounter || generating) return;
@@ -82,7 +83,10 @@ export default function EncounterWorkspace() {
     return () => { if (timer.current) clearTimeout(timer.current); };
   }, [transcript, soap, encounter, generating]);
 
-  // ICD 搜索：防抖 350ms
+  // Clear the post-save confirmation once the provider edits the note again
+  useEffect(() => { setSavedOk(false); }, [soap, transcript]);
+
+  // ICD search: debounce 350ms
   useEffect(() => {
     const q = icdQuery.trim();
     if (!q) { setIcdHits([]); return; }
@@ -109,7 +113,7 @@ export default function EncounterWorkspace() {
         onTool: (label) => setToolNotice(label),
       });
     } catch (err) {
-      flash("生成失败：" + (err as Error).message);
+      flash("Generation failed: " + (err as Error).message);
     } finally {
       setGenerating(false);
     }
@@ -119,11 +123,11 @@ export default function EncounterWorkspace() {
     if (!encounter) return;
     setSaving(true);
     try {
-      const r = await api.post(`/encounters/${encounter.id}/notes`, soap);
-      flash(`已保存 V${r.data.version_no}`);
+      await api.post(`/encounters/${encounter.id}/notes`, soap);
+      setSavedOk(true);
       await fetchVersions(encounter.id);
     } catch {
-      flash("保存失败");
+      flash("Save failed");
     } finally {
       setSaving(false);
     }
@@ -143,27 +147,35 @@ export default function EncounterWorkspace() {
       assessment: (s.assessment ? s.assessment + "\n" : "") + `- ${hit.code}: ${hit.description}`,
     }));
 
-  // ── 未建/未恢复就诊：表单 ──
+  // A note may only be saved when it has real clinical content
+  const noteEmpty =
+    !soap.subjective?.trim() && !soap.objective?.trim() &&
+    !soap.assessment?.trim() && !soap.plan?.trim();
+  const canSave = !saving && !noteEmpty && !soap.insufficient;
+
+  // ── New encounter form (before an encounter is created/resumed) ──
   if (!encounter) {
     return (
       <div className="page">
         <Topbar user={user} logout={logout} />
         <main className="content">
           <form className="card wide" onSubmit={startEncounter}>
-            <h2>新建就诊</h2>
+            <h2>New Encounter</h2>
+            <p className="hint">Enter patient details to begin. Returning patients are matched automatically.</p>
             <div className="row">
-              <input required placeholder="名 First name"
+              <input required placeholder="First name"
                 value={form.first_name} onChange={(e) => setForm({ ...form, first_name: e.target.value })} />
-              <input required placeholder="姓 Last name"
+              <input required placeholder="Last name"
                 value={form.last_name} onChange={(e) => setForm({ ...form, last_name: e.target.value })} />
-              <input required type="date"
+              <input required type="date" title="Date of birth"
                 value={form.dob} onChange={(e) => setForm({ ...form, dob: e.target.value })} />
             </div>
+            <label className="field">Note template</label>
             <select value={form.template_id} onChange={(e) => setForm({ ...form, template_id: e.target.value })}>
-              <option value="">（不使用模板 / General）</option>
+              <option value="">General SOAP (default)</option>
               {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
-            <button type="submit">开始就诊 →</button>
+            <button className="primary" type="submit">Start Encounter</button>
           </form>
         </main>
       </div>
@@ -175,64 +187,84 @@ export default function EncounterWorkspace() {
     <div className="page">
       <Topbar user={user} logout={logout} />
       {toast && <div className="toast">{toast}</div>}
+
+      {/* Patient context bar */}
+      <div className="patient-bar">
+        <span className="pname">{p.first_name} {p.last_name}</span>
+        <span className="pmeta">DOB {p.dob}</span>
+        {encounter.is_returning && <span className="returning">Returning patient</span>}
+      </div>
+
       <main className="workspace">
-        {/* 左栏：转录 */}
+        {/* Left column: transcript */}
         <section className="panel">
           <div className="panel-head">
-            <h3>转录 / 临床观察</h3>
-            <span className="patient-chip">
-              {p.first_name} {p.last_name} · {p.dob}
-              {encounter.is_returning && <em className="returning"> 复诊</em>}
-            </span>
+            <h3>Transcript / Clinical Notes</h3>
           </div>
-          <textarea className="transcript" rows={16} placeholder="粘贴就诊转录或自由书写临床观察…"
+          <textarea className="transcript" rows={18}
+            placeholder="Paste the visit transcript or type clinical observations…"
             value={transcript} onChange={(e) => setTranscript(e.target.value)} />
           <div className="row-between">
             <button className="primary" disabled={generating || !transcript.trim()} onClick={generate}>
-              {generating ? "生成中…" : "Generate Note"}
+              {generating ? "Generating…" : "Generate Note"}
             </button>
-            {draftSaved && <span className="muted">草稿已保存 {draftSaved}</span>}
+            {draftSaved && <span className="muted">Draft saved {draftSaved}</span>}
           </div>
         </section>
 
-        {/* 中栏：SOAP + ICD 控件 */}
+        {/* Middle column: SOAP + ICD */}
         <section className="panel">
           <div className="panel-head">
-            <h3>SOAP 笔记</h3>
-            <button className="primary" disabled={saving} onClick={save}>
-              {saving ? "保存中…" : "Save"}
+            <h3>SOAP Note</h3>
+            <button className="primary" disabled={!canSave} onClick={save}
+              title={canSave ? "" : "Add clinical content before saving"}>
+              {saving ? "Saving…" : "Save Note"}
             </button>
           </div>
 
-          {toolNotice && <div className="tool-notice">🔍 {toolNotice}（已注入既往史）</div>}
+          {savedOk && (
+            <div className="notice success">
+              <span className="ico">✓</span>
+              <span>Clinical note saved to the patient record.</span>
+            </div>
+          )}
+
+          {toolNotice && (
+            <div className="notice info">
+              <span className="ico">i</span>
+              <span>{toolNotice}</span>
+            </div>
+          )}
 
           {soap.insufficient ? (
-            <div className="insufficient">⚠️ 转录中未发现足够的临床信息：{soap.insufficient}</div>
+            <div className="notice warning">
+              <span className="ico">!</span>
+              <span>This transcript does not contain enough clinical information to generate a note. Please add clinical detail and generate again.</span>
+            </div>
           ) : (
             <div className="soap">
               <SoapBox label="S — Subjective" value={soap.subjective}
                 onChange={(v) => setSoap({ ...soap, subjective: v })} />
               <SoapBox label="O — Objective" value={soap.objective}
                 onChange={(v) => setSoap({ ...soap, objective: v })} />
-              <SoapBox label="A — Assessment（含 ICD-10）" value={soap.assessment}
+              <SoapBox label="A — Assessment (with ICD-10)" value={soap.assessment}
                 onChange={(v) => setSoap({ ...soap, assessment: v })} />
               <SoapBox label="P — Plan" value={soap.plan}
                 onChange={(v) => setSoap({ ...soap, plan: v })} />
             </div>
           )}
 
-          {/* ICD-10 搜索控件 */}
+          {/* ICD-10 search */}
           <div className="icd">
-            <label>ICD-10 搜索（输入英文症状/诊断）</label>
+            <label>ICD-10 search (enter a symptom or diagnosis)</label>
             <input placeholder="e.g. shortness of breath on exertion"
               value={icdQuery} onChange={(e) => setIcdQuery(e.target.value)} />
             {icdHits.length > 0 && (
               <ul className="icd-hits">
                 {icdHits.map((h) => (
-                  <li key={h.code} onClick={() => appendIcd(h)} title="点击加入 Assessment">
+                  <li key={h.code} onClick={() => appendIcd(h)} title="Click to add to Assessment">
                     <code>{h.code}</code>
-                    <span>{h.description}</span>
-                    {h.score != null && <em>{h.score}</em>}
+                    <span className="desc">{h.description}</span>
                   </li>
                 ))}
               </ul>
@@ -240,20 +272,20 @@ export default function EncounterWorkspace() {
           </div>
         </section>
 
-        {/* 右栏：版本历史 */}
-         <aside className="panel narrow">
+        {/* Right column: version history */}
+        <aside className="panel narrow">
           <div className="panel-head">
-            <h3>版本历史</h3>
+            <h3>Version History</h3>
             {versions.length >= 2 && (
-              <button onClick={() => nav(`/diff?id=${encounter.id}`)}>对比</button>
+              <button className="ghost" onClick={() => nav(`/diff?id=${encounter.id}`)}>Compare</button>
             )}
           </div>
-          {versions.length === 0 && <p className="muted">尚无保存版本</p>}
+          {versions.length === 0 && <p className="muted">No saved versions yet.</p>}
           <ul className="versions">
             {versions.map((v) => (
               <li key={v.version_no} onClick={() => viewVersion(v)}>
-                <strong>V{v.version_no}</strong>
-                <span>{v.author_name}</span>
+                <strong>Version {v.version_no}</strong>
+                <span className="vmeta">{v.author_name}</span>
                 <time>{new Date(v.created_at).toLocaleString()}</time>
               </li>
             ))}
@@ -268,9 +300,13 @@ function Topbar({ user, logout }: { user: any; logout: () => void }) {
   const nav = useNavigate();
   return (
     <header className="topbar">
-      <strong style={{ cursor: "pointer" }} onClick={() => nav("/")}>Clinical Scribe</strong>
-      <span>{user?.first_name} {user?.last_name} · {user?.role}</span>
-      <button onClick={logout}>退出</button>
+      <img className="brand-logo" src="/mednotecopilot.png" alt="MedNote Copilot" onClick={() => nav("/")} />
+      <button className="ghost" onClick={() => nav("/")}>Dashboard</button>
+      <span className="user">
+        {user?.first_name} {user?.last_name}
+        <span className="role">{user?.role}</span>
+      </span>
+      <button className="ghost" onClick={logout}>Sign out</button>
     </header>
   );
 }

@@ -23,11 +23,12 @@ export async function streamSoap(
     body: JSON.stringify({ transcript }),
   });
 
-    if (res.status === 401) {        // fetch 不走 axios 拦截器，这里手动对齐同一套逻辑
-    // 同样【不硬跳转】，广播事件让 AuthContext 弹就地重登，保住正在编辑的转录/草稿
+  if (res.status === 401) {        // fetch bypasses the axios interceptor, so mirror the same logic here
+    // Same as the interceptor: no hard redirect — broadcast the event so AuthContext shows the
+    // in-place re-login modal, preserving the transcript/draft the provider is editing.
     localStorage.removeItem("token");
     window.dispatchEvent(new CustomEvent("session-expired"));
-    throw new Error("会话已过期，请重新登录");
+    throw new Error("Your session has expired. Please sign in again.");
   }
   if (!res.ok || !res.body) throw new Error(`generate failed: ${res.status}`);
 

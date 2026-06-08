@@ -24,10 +24,10 @@ export default function DiffPage() {
   const encId = params.get("id");
 
   const [versions, setVersions] = useState<Version[]>([]);
-  const [oldNo, setOldNo] = useState<number | null>(null);   // 基准（旧）
-  const [newNo, setNewNo] = useState<number | null>(null);   // 对比（新）
+  const [oldNo, setOldNo] = useState<number | null>(null);   // base (older)
+  const [newNo, setNewNo] = useState<number | null>(null);   // compare (newer)
 
-  // 拉该就诊的全部版本（后端已按 version_no 倒序）；默认对比「次新 → 最新」
+  // Load all versions (backend returns them in descending order); default: previous → latest
   useEffect(() => {
     if (!encId) return;
     api.get<Version[]>(`/encounters/${encId}/notes`).then((r) => {
@@ -44,38 +44,42 @@ export default function DiffPage() {
   return (
     <div className="page">
       <header className="topbar">
-        <strong style={{ cursor: "pointer" }} onClick={() => nav(`/encounter?id=${encId}`)}>
-          ← 返回就诊
-        </strong>
-        <span>{user?.first_name} {user?.last_name} · {user?.role}</span>
-        <button onClick={logout}>退出</button>
+        <img className="brand-logo" src="/mednotecopilot.png" alt="MedNote Copilot" onClick={() => nav("/")} />
+        <button className="ghost" onClick={() => nav(`/encounter?id=${encId}`)}>Back to Encounter</button>
+        <span className="user">
+          {user?.first_name} {user?.last_name}
+          <span className="role">{user?.role}</span>
+        </span>
+        <button className="ghost" onClick={logout}>Sign out</button>
       </header>
       <main className="content">
-        <h2>版本对比</h2>
+        <div className="page-head">
+          <h2>Compare Versions</h2>
+          <p>Review what changed between two saved versions of this note.</p>
+        </div>
 
         {versions.length < 2 ? (
-          <p className="muted">至少需要两个已保存版本才能对比。</p>
+          <div className="empty-state">At least two saved versions are required to compare.</div>
         ) : (
           <>
             <div className="filters">
-              <label>基准（旧）</label>
+              <label>Base (older)</label>
               <select value={oldNo ?? ""} onChange={(e) => setOldNo(Number(e.target.value))}>
                 {versions.map((v) => (
                   <option key={v.version_no} value={v.version_no}>
-                    V{v.version_no} · {new Date(v.created_at).toLocaleString()}
+                    Version {v.version_no} · {new Date(v.created_at).toLocaleString()}
                   </option>
                 ))}
               </select>
-              <span>→</span>
-              <label>对比（新）</label>
+              <label>Compare (newer)</label>
               <select value={newNo ?? ""} onChange={(e) => setNewNo(Number(e.target.value))}>
                 {versions.map((v) => (
                   <option key={v.version_no} value={v.version_no}>
-                    V{v.version_no} · {new Date(v.created_at).toLocaleString()}
+                    Version {v.version_no} · {new Date(v.created_at).toLocaleString()}
                   </option>
                 ))}
               </select>
-              <span className="diff-legend"><i className="del">删除</i> <i className="add">新增</i></span>
+              <span className="diff-legend"><i className="del">Removed</i> <i className="add">Added</i></span>
             </div>
 
             {oldV && newV && SECTIONS.map((s) => (

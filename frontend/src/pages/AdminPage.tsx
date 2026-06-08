@@ -9,6 +9,8 @@ type EncRow = { id: string; status: string; created_at: string; patient_name: st
 type Template = { id: string; name: string; encounter_type: string | null; system_prompt: string; is_active: boolean; created_at: string; updated_at: string };
 type Tab = "encounters" | "providers" | "templates";
 
+const STATUS_LABEL: Record<string, string> = { draft: "Draft", generated: "Generated", finalized: "Finalized" };
+
 export default function AdminPage() {
   const { user, logout } = useAuth();
   const nav = useNavigate();
@@ -17,14 +19,17 @@ export default function AdminPage() {
   return (
     <div className="page">
       <header className="topbar">
-        <strong style={{ cursor: "pointer" }} onClick={() => nav("/")}>Clinical Scribe · Admin</strong>
-        <span>{user?.first_name} {user?.last_name} · {user?.role}</span>
-        <button onClick={logout}>退出</button>
+        <img className="brand-logo" src="/mednotecopilot.png" alt="MedNote Copilot" onClick={() => nav("/admin")} />
+        <span className="user">
+          {user?.first_name} {user?.last_name}
+          <span className="role">{user?.role}</span>
+        </span>
+        <button className="ghost" onClick={logout}>Sign out</button>
       </header>
       <nav className="tabs">
-        <button className={tab === "encounters" ? "active" : ""} onClick={() => setTab("encounters")}>全部就诊</button>
-        <button className={tab === "providers" ? "active" : ""} onClick={() => setTab("providers")}>医生账号</button>
-        <button className={tab === "templates" ? "active" : ""} onClick={() => setTab("templates")}>笔记模板</button>
+        <button className={tab === "encounters" ? "active" : ""} onClick={() => setTab("encounters")}>All Encounters</button>
+        <button className={tab === "providers" ? "active" : ""} onClick={() => setTab("providers")}>Providers</button>
+        <button className={tab === "templates" ? "active" : ""} onClick={() => setTab("templates")}>Note Templates</button>
       </nav>
       <main className="content">
         {tab === "encounters" && <EncountersTab />}
@@ -35,7 +40,7 @@ export default function AdminPage() {
   );
 }
 
-// ── 全部就诊 ──────────────────────────────────────────────────────────────────
+// ── All encounters ─────────────────────────────────────────────────────────────
 function EncountersTab() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [rows, setRows] = useState<EncRow[]>([]);
@@ -52,22 +57,24 @@ function EncountersTab() {
     if (to) params.date_to = to;
     api.get<EncRow[]>("/admin/encounters", { params }).then((r) => setRows(r.data)).catch(() => {});
   };
-  useEffect(() => { load(); }, []);   // 首次加载全部
+  useEffect(() => { load(); }, []);   // initial load: all
 
   return (
     <div>
       <div className="filters">
+        <label>Provider</label>
         <select value={providerId} onChange={(e) => setProviderId(e.target.value)}>
-          <option value="">全部医生</option>
+          <option value="">All providers</option>
           {providers.map((p) => <option key={p.id} value={p.id}>{p.first_name} {p.last_name}</option>)}
         </select>
+        <label>From</label>
         <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-        <span>至</span>
+        <label>To</label>
         <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-        <button className="primary" onClick={load}>查询</button>
+        <button className="primary" onClick={load}>Search</button>
       </div>
       <table className="grid">
-        <thead><tr><th>就诊时间</th><th>医生</th><th>患者</th><th>DOB</th><th>状态</th></tr></thead>
+        <thead><tr><th>Date</th><th>Provider</th><th>Patient</th><th>DOB</th><th>Status</th></tr></thead>
         <tbody>
           {rows.map((e) => (
             <tr key={e.id}>
@@ -75,17 +82,17 @@ function EncountersTab() {
               <td>{e.provider_name}</td>
               <td>{e.patient_name}</td>
               <td>{e.dob}</td>
-              <td><span className="badge">{e.status}</span></td>
+              <td><span className={`badge ${e.status}`}>{STATUS_LABEL[e.status] ?? e.status}</span></td>
             </tr>
           ))}
-          {rows.length === 0 && <tr><td colSpan={5} className="muted">无结果</td></tr>}
+          {rows.length === 0 && <tr><td colSpan={5} className="muted">No results.</td></tr>}
         </tbody>
       </table>
     </div>
   );
 }
 
-// ── 医生账号 ──────────────────────────────────────────────────────────────────
+// ── Providers ──────────────────────────────────────────────────────────────────
 function ProvidersTab() {
   const [list, setList] = useState<Provider[]>([]);
   const blank = { email: "", password: "", first_name: "", last_name: "" };
@@ -100,9 +107,9 @@ function ProvidersTab() {
     setMsg("");
     try {
       await api.post("/admin/providers", form);
-      setForm(blank); setMsg("已创建"); load();
+      setForm(blank); setMsg("Provider created."); load();
     } catch {
-      setMsg("创建失败（邮箱可能已存在）");
+      setMsg("Could not create provider (email may already exist).");
     }
   };
 
@@ -114,29 +121,29 @@ function ProvidersTab() {
   return (
     <div className="two-col">
       <div>
-        <h3>医生列表</h3>
+        <h3>Provider Accounts</h3>
         <table className="grid">
-          <thead><tr><th>姓名</th><th>邮箱</th><th>状态</th><th></th></tr></thead>
+          <thead><tr><th>Name</th><th>Email</th><th>Status</th><th></th></tr></thead>
           <tbody>
             {list.map((p) => (
               <tr key={p.id} className={p.is_active ? "" : "row-off"}>
                 <td>{p.first_name} {p.last_name}</td>
                 <td>{p.email}</td>
-                <td>{p.is_active ? <span className="badge ok">在用</span> : <span className="badge off">已停用</span>}</td>
-                <td><button onClick={() => toggle(p)}>{p.is_active ? "停用" : "启用"}</button></td>
+                <td>{p.is_active ? <span className="badge ok">Active</span> : <span className="badge off">Deactivated</span>}</td>
+                <td className="actions"><button className="ghost" onClick={() => toggle(p)}>{p.is_active ? "Deactivate" : "Activate"}</button></td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
       <div>
-        <h3>新增医生</h3>
+        <h3>Add Provider</h3>
         <form className="card" onSubmit={create}>
-          <input required placeholder="名" value={form.first_name} onChange={(e) => setForm({ ...form, first_name: e.target.value })} />
-          <input required placeholder="姓" value={form.last_name} onChange={(e) => setForm({ ...form, last_name: e.target.value })} />
-          <input required type="email" placeholder="邮箱" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-          <input required type="text" placeholder="初始密码" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
-          <button className="primary" type="submit">创建账号</button>
+          <input required placeholder="First name" value={form.first_name} onChange={(e) => setForm({ ...form, first_name: e.target.value })} />
+          <input required placeholder="Last name" value={form.last_name} onChange={(e) => setForm({ ...form, last_name: e.target.value })} />
+          <input required type="email" placeholder="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+          <input required type="text" placeholder="Initial password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+          <button className="primary" type="submit">Create Account</button>
           {msg && <p className="muted">{msg}</p>}
         </form>
       </div>
@@ -144,7 +151,7 @@ function ProvidersTab() {
   );
 }
 
-// ── 笔记模板 ──────────────────────────────────────────────────────────────────
+// ── Note templates ─────────────────────────────────────────────────────────────
 function TemplatesTab() {
   const [list, setList] = useState<Template[]>([]);
   const blank = { name: "", encounter_type: "", system_prompt: "", is_active: true };
@@ -168,7 +175,7 @@ function TemplatesTab() {
   };
 
   const remove = async (t: Template) => {
-    if (!window.confirm(`删除模板「${t.name}」？`)) return;
+    if (!window.confirm(`Delete template "${t.name}"?`)) return;
     await api.delete(`/admin/templates/${t.id}`);
     if (editingId === t.id) startNew();
     load();
@@ -177,18 +184,18 @@ function TemplatesTab() {
   return (
     <div className="two-col">
       <div>
-        <h3>模板列表</h3>
+        <h3>Templates</h3>
         <table className="grid">
-          <thead><tr><th>名称</th><th>类型</th><th>状态</th><th></th></tr></thead>
+          <thead><tr><th>Name</th><th>Type</th><th>Status</th><th></th></tr></thead>
           <tbody>
             {list.map((t) => (
               <tr key={t.id}>
                 <td>{t.name}</td>
                 <td className="muted">{t.encounter_type || "—"}</td>
-                <td>{t.is_active ? <span className="badge ok">启用</span> : <span className="badge off">停用</span>}</td>
-                <td>
-                  <button onClick={() => startEdit(t)}>编辑</button>
-                  <button onClick={() => remove(t)}>删除</button>
+                <td>{t.is_active ? <span className="badge ok">Active</span> : <span className="badge off">Inactive</span>}</td>
+                <td className="actions">
+                  <button className="ghost" onClick={() => startEdit(t)}>Edit</button>
+                  <button className="ghost" onClick={() => remove(t)}>Delete</button>
                 </td>
               </tr>
             ))}
@@ -196,19 +203,19 @@ function TemplatesTab() {
         </table>
       </div>
       <div>
-        <h3>{editingId ? "编辑模板" : "新建模板"}</h3>
+        <h3>{editingId ? "Edit Template" : "New Template"}</h3>
         <form className="card" onSubmit={submit}>
-          <input required placeholder="模板名称" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          <input placeholder="就诊类型（可选，如 ortho_followup）" value={form.encounter_type} onChange={(e) => setForm({ ...form, encounter_type: e.target.value })} />
-          <textarea required rows={8} placeholder="System prompt（决定 AI 生成风格）"
+          <input required placeholder="Template name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          <input placeholder="Encounter type (optional, e.g. ortho_followup)" value={form.encounter_type} onChange={(e) => setForm({ ...form, encounter_type: e.target.value })} />
+          <textarea required rows={8} placeholder="System prompt (controls the AI's documentation style)"
             value={form.system_prompt} onChange={(e) => setForm({ ...form, system_prompt: e.target.value })} />
           <label className="check">
             <input type="checkbox" checked={form.is_active} onChange={(e) => setForm({ ...form, is_active: e.target.checked })} />
-            启用（provider 可选用）
+            Active (selectable by providers)
           </label>
           <div className="row">
-            <button className="primary" type="submit">{editingId ? "保存修改" : "创建模板"}</button>
-            {editingId && <button type="button" onClick={startNew}>取消</button>}
+            <button className="primary" type="submit">{editingId ? "Save Changes" : "Create Template"}</button>
+            {editingId && <button className="ghost" type="button" onClick={startNew}>Cancel</button>}
           </div>
         </form>
       </div>

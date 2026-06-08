@@ -95,8 +95,10 @@ async def generate_soap_stream(
         if msg.tool_calls:
             tc = msg.tool_calls[0]
             history = await fetch_history()                 # ← 真去 RDS 查
+            _n = len(history)
             yield {"type": "tool",
-                   "label": f"get_patient_history → 取回 {len(history)} 条既往就诊"}
+                   "label": f"Prior encounter history retrieved and incorporated "
+                            f"({_n} previous visit{'s' if _n != 1 else ''})."}
             # 把“模型的工具调用”和“工具返回结果”回灌进对话，让 Phase B 能用上
             messages.append({
                 "role": "assistant",

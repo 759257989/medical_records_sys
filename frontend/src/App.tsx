@@ -19,7 +19,7 @@ export default function App() {
         <Route path="/diff" element={<ProtectedRoute><DiffPage /></ProtectedRoute>} />
         <Route path="/admin" element={<AdminRoute><AdminPage /></AdminRoute>} />
       </Routes>
-      <SessionExpiredModal />   {/* 常驻浮层：任何页面会话失效都能优雅接管 */}
+      <SessionExpiredModal />   {/* persistent overlay: gracefully handles session loss on any page */}
     </>
   );
 }

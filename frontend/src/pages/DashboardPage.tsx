@@ -13,29 +13,41 @@ type Enc = {
   version_count: number;
 };
 
+const STATUS_LABEL: Record<string, string> = {
+  draft: "Draft",
+  generated: "Generated",
+  finalized: "Finalized",
+};
+
 export default function DashboardPage() {
   const { user, logout } = useAuth();
   const nav = useNavigate();
   const [items, setItems] = useState<Enc[]>([]);
+  const [showCompleted, setShowCompleted] = useState(false);   // Completed section is foldable
+
+  // Admins do not use the provider workspace — send them to the console.
+  useEffect(() => {
+    if (user?.role === "admin") nav("/admin", { replace: true });
+  }, [user, nav]);
 
   useEffect(() => {
     api.get<Enc[]>("/encounters/mine").then((r) => setItems(r.data)).catch(() => {});
   }, []);
 
-  const drafts = items.filter((e) => e.status !== "finalized");   // 未完成（可继续）
-  const done = items.filter((e) => e.status === "finalized");      // 已完成（可查看/续写）
+  const drafts = items.filter((e) => e.status !== "finalized");   // in progress
+  const done = items.filter((e) => e.status === "finalized");      // completed
 
   const renderList = (list: Enc[], cta: string) => (
     <ul className="draft-list">
       {list.map((e) => (
         <li key={e.id}>
-          <div>
-            <strong>{e.patient_name}</strong> · {e.dob}
-            <span className="badge">{e.status}</span>
-            {e.version_count > 0 && <span className="badge">{e.version_count} 版本</span>}
+          <div className="patient">
+            <strong>{e.patient_name}</strong> · DOB {e.dob}
+            <span className={`badge ${e.status}`}>{STATUS_LABEL[e.status] ?? e.status}</span>
+            {e.version_count > 0 && <span className="badge">{e.version_count} version{e.version_count > 1 ? "s" : ""}</span>}
           </div>
-          <div className="muted">更新于 {new Date(e.updated_at).toLocaleString()}</div>
-          <button onClick={() => nav(`/encounter?id=${e.id}`)}>{cta} →</button>
+          <div className="meta">Updated {new Date(e.updated_at).toLocaleString()}</div>
+          <button className="primary" onClick={() => nav(`/encounter?id=${e.id}`)}>{cta}</button>
         </li>
       ))}
     </ul>
@@ -44,24 +56,39 @@ export default function DashboardPage() {
   return (
     <div className="page">
       <header className="topbar">
-        <strong>Clinical Scribe</strong>
-        <span>{user?.first_name} {user?.last_name} · {user?.role}</span>
-        <button onClick={logout}>退出</button>
+        <img className="brand-logo" src="/mednotecopilot.png" alt="MedNote Copilot" onClick={() => nav("/")} />
+        <span className="user">
+          {user?.first_name} {user?.last_name}
+          <span className="role">{user?.role}</span>
+        </span>
+        <button className="ghost" onClick={logout}>Sign out</button>
       </header>
+
       <main className="content">
-        <h2>Welcome, {user?.first_name}</h2>
-        <button className="primary" onClick={() => nav("/encounter")}>+ 新建就诊</button>
+        <div className="page-head">
+          <h2>Welcome, {user?.first_name}</h2>
+          <p>Create a new encounter or continue documenting an existing one.</p>
+        </div>
 
-        <h3 style={{ marginTop: 24 }}>未完成的就诊（可继续）</h3>
-        {drafts.length === 0 ? <p className="muted">没有未完成的草稿。</p> : renderList(drafts, "继续")}
+        <button className="primary" onClick={() => nav("/encounter")}>New Encounter</button>
 
-        <h3 style={{ marginTop: 24 }}>已完成的就诊（可查看版本历史 / 续写）</h3>
-        {done.length === 0 ? <p className="muted">还没有已完成的就诊。</p> : renderList(done, "打开")}
+        {/* In progress — always visible */}
+        <div className="section-toggle" style={{ cursor: "default" }}>
+          In progress <span className="count">({drafts.length})</span>
+        </div>
+        {drafts.length === 0
+          ? <div className="empty-state">No encounters in progress.</div>
+          : renderList(drafts, "Continue")}
 
-        {user?.role === "admin" && (
-          <p style={{ marginTop: 24 }}>
-            <button className="primary" onClick={() => nav("/admin")}>进入管理后台 →</button>
-          </p>
+        {/* Completed — foldable */}
+        <div className="section-toggle" onClick={() => setShowCompleted((v) => !v)}>
+          <span className={`chevron ${showCompleted ? "open" : ""}`}>▶</span>
+          Completed <span className="count">({done.length})</span>
+        </div>
+        {showCompleted && (
+          done.length === 0
+            ? <div className="empty-state">No completed encounters yet.</div>
+            : renderList(done, "Open")
         )}
       </main>
     </div>
