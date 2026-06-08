@@ -125,6 +125,40 @@ Open **http://localhost:5173**.
 | `OPENAI_API_KEY` | Required for SOAP generation and ICD embeddings |
 | `ENVIRONMENT` | `local` or `aws` |
 
-
 ---
+
+## Architecture & Technical Decisions
+
+```
+                        Browser (React SPA)
+                              │  HTTPS
+                              ▼
+                    nginx  (TLS · serves SPA · reverse-proxies /api · no buffering for SSE)
+                              │  127.0.0.1:8000
+                              ▼
+                    FastAPI  (JWT auth · streaming · function calling)
+                          │                         │
+            connection pool│                         │ OpenAI API
+                          ▼                         ▼
+        RDS PostgreSQL 16 + pgvector        GPT-4o · text-embedding-3-small
+        (private subnet, not public)
+```
+
+**Streaming (SSE).** The backend returns the model output as a `text/event-stream`; the frontend reads the stream and parses the SOAP sections as they arrive, so the note renders live instead of appearing all at once. In production, nginx has `proxy_buffering off` on `/api` so the stream is not batched.
+
+**Patient history via function calling.** For a returning patient, the model is given a `get_patient_history` tool. When it calls the tool, the backend queries RDS for the patient's prior notes and feeds them back as a tool message. The frontend never receives the raw history — it stays server-side, which is both cleaner and more secure than injecting records into a client-side prompt.
+
+**Model choice & prompt design.** GPT-4o was chosen for reliable tool-calling and solid clinical reasoning. The system prompt enforces a strict output contract: return the four SOAP sections with fixed markers, never fabricate facts that aren't in the transcript, and emit an `INSUFFICIENT` marker when the transcript has no clinical content — which is what powers the graceful edge-case handling.
+
+**Semantic ICD-10 search.** ~200+ ICD-10 codes are embedded with `text-embedding-3-small` (1536-dim) and stored in Postgres via **pgvector** with an **HNSW** index. Plain-English queries are embedded and matched by cosine distance, so results are semantic, not keyword-based (with a keyword fallback if no API key is set).
+
+**Normalized schema & immutable versions.** Separate tables for users, patients, encounters, note versions, templates, ICD codes, and an audit log, connected with foreign keys. Note versions are **append-only** with a `UNIQUE(encounter_id, version_no)` constraint, so history can never be overwritten. Every admin action is written to the audit log **in the same transaction** as the change.
+
+**Real-time templates.** The active template is read from the database **at generation time**, so an admin's edit takes effect on the provider's next generation with no caching and no page refresh.
+
+**Connection pooling.** A single async SQLAlchemy engine maintains one pool (`pool_size=10`, `max_overflow=5`, pre-ping, 30-min recycle). The app never opens a new database connection per request.
+
+**Auth & RBAC.** JWT (HS256, 8-hour expiry) with bcrypt-hashed passwords. Every request re-checks that the account is still active, so a deactivated provider is locked out immediately. Encounter ownership is enforced on the backend — providers can only access their own data.
+
+**Production infrastructure (AWS).** nginx handles TLS and serves both the SPA and the API; the app process (uvicorn) only listens on `127.0.0.1:8000` and is never directly exposed. RDS runs in a **private subnet** and is **not publicly accessible** — it only accepts connections from the app's security group. All secrets are stored in **AWS Secrets Manager** and read at startup via an EC2 IAM role; nothing sensitive is committed to the repo.
 
