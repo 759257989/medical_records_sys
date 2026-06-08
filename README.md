@@ -17,17 +17,17 @@
 A physician pastes a visit transcript (or types free-form notes), and the AI returns a structured **SOAP note** (Subjective, Objective, Assessment, Plan) with suggested **ICD-10 codes** — rendered live as it generates.
 
 **Provider**
-- ✍️ **Streaming SOAP generation** from a transcript (real-time, server-sent events — no spinner-then-dump).
-- 🔎 **Semantic ICD-10 search** (vector similarity) — type a symptom in plain English, click to add it to the note.
-- 🧠 **Patient-history aware** — for returning patients, the AI pulls prior notes via a backend **function call** (not stuffed into the frontend prompt) and writes a different note accordingly.
-- 🗂️ **Version history** — every save is a new immutable version; **diff view** highlights what changed.
-- 💾 **Draft autosave & session persistence** — refresh or switch devices and continue where you left off.
+- **Streaming SOAP generation** from a transcript (real-time, server-sent events — no spinner-then-dump).
+- **Semantic ICD-10 search** (vector similarity) — type a symptom in plain English, click to add it to the note.
+- **Patient-history aware** — for returning patients, the AI pulls prior notes via a backend **function call** (not stuffed into the frontend prompt) and writes a different note accordingly.
+- **Version history** — every save is a new immutable version; **diff view** highlights what changed.
+- **Draft autosave & session persistence** — refresh or switch devices and continue where you left off.
 
 **Admin**
-- 👀 View **all encounters** across providers, filter by provider and date range.
-- 👤 **Add / deactivate** provider accounts (deactivation takes effect immediately).
-- 🧩 Manage **note templates** that shape the AI's output — edits apply on the provider's **next generation with no page refresh**.
-- 📝 Every admin action is written to an **audit log**.
+- View **all encounters** across providers, filter by provider and date range.
+- **Add / deactivate** provider accounts (deactivation takes effect immediately).
+- Manage **note templates** that shape the AI's output — edits apply on the provider's **next generation with no page refresh**.
+- Every admin action is written to an **audit log**.
 
 **Robustness**
 - Graceful handling of edge cases: a transcript with no clinical content is **not** turned into a hallucinated note; an expired session shows a re-login prompt **without losing the draft**; deactivating a provider mid-draft locks them out but keeps their work safe.
@@ -63,7 +63,7 @@ docker-compose.yml   Local PostgreSQL (pgvector) on port 5433
 ### Prerequisites
 - **Docker** (for the local database)
 - **Python 3.11+**
-- **Node 20 or 22** (⚠️ not Node 21 — Vite/rolldown breaks on it)
+- **Node 20 or 22** 
 - An **OpenAI API key** (required for note generation)
 
 ### 1. Start the database
@@ -125,34 +125,6 @@ Open **http://localhost:5173**.
 | `OPENAI_API_KEY` | Required for SOAP generation and ICD embeddings |
 | `ENVIRONMENT` | `local` or `aws` |
 
-> Secrets are never committed — `backend/.env` is git-ignored. In production, credentials are loaded from **AWS Secrets Manager** at startup (see the deployment runbook).
 
 ---
 
-## Deployment
-
-Full, step-by-step AWS setup (VPC, RDS private subnet, EC2, nginx, HTTPS, Secrets Manager) is in:
-- **[`guides/aws_setup_detailed.md`](guides/aws_setup_detailed.md)** — click-by-click console runbook
-- **[`guides/phase06.md`](guides/phase06.md)** — the same with the *why* behind each decision
-
-Architecture in one line: **nginx** (TLS, serves the SPA, reverse-proxies `/api`) → **uvicorn** bound to `127.0.0.1:8000` → **RDS PostgreSQL** in a private subnet (not publicly accessible). Secrets live in **Secrets Manager**, read via an EC2 IAM role.
-
----
-
-## Documentation
-
-The `guides/` folder documents the whole build:
-
-| Doc | Contents |
-|---|---|
-| `function_list.md` / `DEVELOPMENT_GUIDE.md` | Feature list & overall plan |
-| `phase01`–`phase06.md` | Step-by-step build: DB & auth → streaming → history & ICD → admin → edge cases & diff → AWS |
-| `aws_setup_detailed.md` | Detailed AWS deployment runbook |
-| `manual_test_plan.md` | Manual QA checklist mapped to requirements |
-| `demo_script.md` | Walkthrough video script |
-
----
-
-## License
-
-For technical evaluation purposes.
