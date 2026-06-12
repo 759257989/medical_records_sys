@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     jwt_secret: str = "dev-only-change-me"
     jwt_expire_hours: int = 8
     openai_api_key: str = ""
+    anthropic_api_key: str = ""
     environment: str = "local"
 
 
