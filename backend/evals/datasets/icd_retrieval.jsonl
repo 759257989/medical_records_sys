@@ -1,0 +1,60 @@
+{"id": "icd_001", "query": "high blood pressure", "relevant": ["I10"]}
+{"id": "icd_002", "query": "type 2 diabetes without complications", "relevant": ["E11.9"]}
+{"id": "icd_003", "query": "acute bronchitis", "relevant": ["J20.9"]}
+{"id": "icd_004", "query": "low back pain", "relevant": ["M54.50"]}
+{"id": "icd_005", "query": "gastroesophageal reflux disease", "relevant": ["K21.9"]}
+{"id": "icd_006", "query": "allergic reaction, unspecified", "relevant": ["T78.40XA"]}
+{"id": "icd_007", "query": "major depressive disorder single episode", "relevant": ["F32.9"]}
+{"id": "icd_008", "query": "urinary tract infection", "relevant": ["N39.0"]}
+{"id": "icd_009", "query": "asthma uncomplicated", "relevant": ["J45.909"]}
+{"id": "icd_010", "query": "iron deficiency anemia", "relevant": ["D50.9"]}
+{"id": "icd_011", "query": "sepsis, unspecified organism", "relevant": ["A41.9"]}
+{"id": "icd_012", "query": "shingles (herpes zoster) without complications", "relevant": ["B02.9"]}
+{"id": "icd_013", "query": "HIV disease", "relevant": ["B20"]}
+{"id": "icd_014", "query": "prostate cancer", "relevant": ["C61"]}
+{"id": "icd_015", "query": "colon cancer", "relevant": ["C18.9"]}
+{"id": "icd_016", "query": "low platelet count thrombocytopenia", "relevant": ["D69.6"]}
+{"id": "icd_017", "query": "type 2 diabetes with hyperglycemia", "relevant": ["E11.65"]}
+{"id": "icd_018", "query": "underactive thyroid hypothyroidism", "relevant": ["E03.9"]}
+{"id": "icd_019", "query": "high cholesterol", "relevant": ["E78.00", "E78.5"]}
+{"id": "icd_020", "query": "obesity", "relevant": ["E66.9"]}
+{"id": "icd_021", "query": "generalized anxiety disorder", "relevant": ["F41.1"]}
+{"id": "icd_022", "query": "post-traumatic stress disorder", "relevant": ["F43.10"]}
+{"id": "icd_023", "query": "bipolar disorder", "relevant": ["F31.9"]}
+{"id": "icd_024", "query": "alcohol dependence", "relevant": ["F10.20"]}
+{"id": "icd_025", "query": "migraine headache", "relevant": ["G43.909"]}
+{"id": "icd_026", "query": "epilepsy seizure disorder", "relevant": ["G40.909"]}
+{"id": "icd_027", "query": "obstructive sleep apnea", "relevant": ["G47.33"]}
+{"id": "icd_028", "query": "Parkinson's disease", "relevant": ["G20"]}
+{"id": "icd_029", "query": "glaucoma", "relevant": ["H40.9"]}
+{"id": "icd_030", "query": "ear infection otitis media", "relevant": ["H66.90"]}
+{"id": "icd_031", "query": "atrial fibrillation", "relevant": ["I48.91"]}
+{"id": "icd_032", "query": "congestive heart failure", "relevant": ["I50.9"]}
+{"id": "icd_033", "query": "non-ST elevation myocardial infarction", "relevant": ["I21.4"]}
+{"id": "icd_034", "query": "pulmonary embolism", "relevant": ["I26.99"]}
+{"id": "icd_035", "query": "common cold", "relevant": ["J00"]}
+{"id": "icd_036", "query": "chronic obstructive pulmonary disease", "relevant": ["J44.9"]}
+{"id": "icd_037", "query": "pneumonia", "relevant": ["J18.9"]}
+{"id": "icd_038", "query": "COVID-19 infection", "relevant": ["U07.1"]}
+{"id": "icd_039", "query": "constipation", "relevant": ["K59.00"]}
+{"id": "icd_040", "query": "irritable bowel syndrome", "relevant": ["K58.9"]}
+{"id": "icd_041", "query": "gallstones", "relevant": ["K80.20"]}
+{"id": "icd_042", "query": "Crohn's disease", "relevant": ["K50.90"]}
+{"id": "icd_043", "query": "cellulitis skin infection", "relevant": ["L03.90"]}
+{"id": "icd_044", "query": "psoriasis", "relevant": ["L40.9"]}
+{"id": "icd_045", "query": "neck pain", "relevant": ["M54.2"]}
+{"id": "icd_046", "query": "knee osteoarthritis", "relevant": ["M17.9"]}
+{"id": "icd_047", "query": "rheumatoid arthritis", "relevant": ["M06.9"]}
+{"id": "icd_048", "query": "gout", "relevant": ["M10.9"]}
+{"id": "icd_049", "query": "chronic kidney disease", "relevant": ["N18.9"]}
+{"id": "icd_050", "query": "kidney stone", "relevant": ["N20.0"]}
+{"id": "icd_051", "query": "benign prostatic hyperplasia enlarged prostate", "relevant": ["N40.0", "N40.1"]}
+{"id": "icd_052", "query": "chest pain", "relevant": ["R07.9"]}
+{"id": "icd_053", "query": "headache", "relevant": ["R51.9"]}
+{"id": "icd_054", "query": "dizziness", "relevant": ["R42"]}
+{"id": "icd_055", "query": "fever", "relevant": ["R50.9"]}
+{"id": "icd_056", "query": "ankle sprain", "relevant": ["S93.409A"]}
+{"id": "icd_057", "query": "broken wrist distal radius fracture", "relevant": ["S52.509A"]}
+{"id": "icd_058", "query": "annual physical exam", "relevant": ["Z00.00"]}
+{"id": "icd_059", "query": "vaccination visit", "relevant": ["Z23"]}
+{"id": "icd_060", "query": "screening colonoscopy for colon cancer", "relevant": ["Z12.11"]}

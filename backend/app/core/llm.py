@@ -147,3 +147,22 @@ async def embed_text(text: str) -> list[float] | None:
 
 async def embed_texts(texts: list[str]) -> list[list[float]] | None:
     return await _EMBED_PROVIDER.embed(texts)
+
+
+# ── 离线(非流式)生成：评估 harness 专用 ─────────────────────────────────────────
+# 复用与生产完全相同的 system(persona + OUTPUT_CONTRACT)和 user 拼装方式，
+# 只是不流式、不开 trace。这样"评估看到的 prompt"== "生产看到的 prompt"。
+async def generate_note(transcript: str, history: list[dict] | None = None) -> str:
+    from types import SimpleNamespace
+    # 评估不关心患者身份，用占位对象复用 _build_system_and_messages 的拼装逻辑。
+    patient = SimpleNamespace(first_name="Eval", last_name="Patient", dob="1990-01-01")
+    system, messages = _build_system_and_messages(None, transcript, patient)
+    if history:                                   # 复诊场景：把历史按生产同样的格式喂进去
+        messages.append(Message(
+            role="user",
+            content="Relevant prior encounter history (JSON):\n" + json.dumps(history),
+        ))
+    result = await complete_with_fallback(
+        _CHAIN, system=system, messages=messages, max_tokens=1200,
+    )
+    return result.text
