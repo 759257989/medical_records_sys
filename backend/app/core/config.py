@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     anthropic_api_key: str = ""
     environment: str = "local"
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+    langfuse_host: str = "http://localhost:3000"   # Cloud 则填 https://cloud.langfuse.com
+    prompt_version: str = "soap_v1"                # prompt 版本标签（为 Phase 3/4 治理埋点）
 
 
 def _hydrate_from_secrets_manager() -> None:

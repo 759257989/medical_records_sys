@@ -202,7 +202,10 @@ async def generate(
     async def event_stream():
         try:
             async for ev in generate_soap_stream(
-                template_prompt, body.transcript, patient, fetch_history, has_history
+                template_prompt, body.transcript, patient, fetch_history, has_history, trace_meta={                                  # ← 新增这一段
+                    "provider_id": str(encounter.provider_id),
+                    "encounter_id": str(encounter.id),
+                },
             ):
                 yield f"data: {json.dumps(ev)}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"

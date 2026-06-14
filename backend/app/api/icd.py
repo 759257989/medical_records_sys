@@ -8,6 +8,7 @@ from app.core.db import get_db
 from app.core.llm import embed_text
 from app.models.icd import Icd10Code
 from app.models.user import User
+from app.core.observability.tracing import span as obs_span
 
 router = APIRouter(prefix="/api/icd10", tags=["icd10"])
 
@@ -19,29 +20,37 @@ async def search_icd(
     db: AsyncSession = Depends(get_db),
 ):
     query = q.strip()
-    qvec = await embed_text(query)   # 有 key → 向量；没 key → None
+    with obs_span("icd_retrieval", input={"query": query}) as sp:
+        qvec = await embed_text(query)
 
-    if qvec is not None:
-        # 语义检索：按余弦距离排序，取最近 8 个。score = 1 - 距离（越接近 1 越像）
-        stmt = (
-            select(
-                Icd10Code.code,
-                Icd10Code.description,
-                (1 - Icd10Code.embedding.cosine_distance(qvec)).label("score"),
+        if qvec is not None:
+            # 语义检索：按余弦距离排序，取最近 8 个。score = 1 - 距离（越接近 1 越像）
+            stmt = (
+                select(
+                    Icd10Code.code,
+                    Icd10Code.description,
+                    (1 - Icd10Code.embedding.cosine_distance(qvec)).label("score"),
+                )
+                .where(Icd10Code.embedding.isnot(None))
+                .order_by(Icd10Code.embedding.cosine_distance(qvec))
+                .limit(8)
             )
-            .where(Icd10Code.embedding.isnot(None))
-            .order_by(Icd10Code.embedding.cosine_distance(qvec))
-            .limit(8)
-        )
-        rows = (await db.execute(stmt)).all()
-        return [{"code": c, "description": d, "score": round(float(s), 3)} for (c, d, s) in rows]
+            rows = (await db.execute(stmt)).all()
+            results = [{"code": c, "description": d, "score": round(float(s), 3)} for (c, d, s) in rows]
+        else:
+            # 降级：关键词匹配（mock 模式 / 向量未灌）
+            stmt = (
+                select(Icd10Code.code, Icd10Code.description)
+                .where(Icd10Code.description.ilike(f"%{query}%"))
+                .order_by(Icd10Code.description)
+                .limit(8)
+            )
+            rows = (await db.execute(stmt)).all()
+            results = [{"code": c, "description": d, "score": None} for (c, d) in rows]
 
-    # 降级：关键词匹配（mock 模式 / 向量未灌）
-    stmt = (
-        select(Icd10Code.code, Icd10Code.description)
-        .where(Icd10Code.description.ilike(f"%{query}%"))
-        .order_by(Icd10Code.description)
-        .limit(8)
-    )
-    rows = (await db.execute(stmt)).all()
-    return [{"code": c, "description": d, "score": None} for (c, d) in rows]
+        sp.update(output={
+            "hits": len(results),
+            "top": results[0]["code"] if results else None,
+            "mode": "vector" if qvec is not None else "keyword",
+        })
+        return results

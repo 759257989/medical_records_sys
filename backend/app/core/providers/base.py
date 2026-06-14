@@ -38,6 +38,8 @@ class Usage:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     cost_usd: float = 0.0
+    model: str = ""        # ← 新增：实际出力的模型
+    provider: str = ""     # ← 新增：openai / anthropic / mock
 
 
 @dataclass

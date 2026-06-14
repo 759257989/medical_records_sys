@@ -28,7 +28,7 @@ class MockProvider:
                           usage=Usage(), model="mock", provider=self.name)
 
     async def stream(self, *, system, messages, model=None, max_tokens=2000,
-                     temperature=0.2, timeout=60.0) -> AsyncIterator[str]:
+                     temperature=0.2, timeout=60.0, usage_sink=None):   # ← 加参数即可
         for line in _MOCK_NOTE.splitlines(keepends=True):
             yield line
 

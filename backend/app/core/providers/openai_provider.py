@@ -70,25 +70,26 @@ class OpenAIProvider:
 
     async def stream(
         self, *, system, messages, model=None, max_tokens=2000,
-        temperature=0.2, timeout=60.0,
-    ) -> AsyncIterator[str]:
+        temperature=0.2, timeout=60.0, usage_sink=None,      # ← 新增 usage_sink
+    ):
         model = model or _DEFAULT_MODEL
-        # stream_options.include_usage=True：让最后一帧带上 usage，否则流式拿不到 token 数。
         stream = await self._client.with_options(timeout=timeout).chat.completions.create(
             model=model,
             messages=self._to_openai_messages(system, messages),
-            stream=True,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            stream_options={"include_usage": True},
+            stream=True, temperature=temperature, max_tokens=max_tokens,
+            stream_options={"include_usage": True},          # 最后一帧带 usage
         )
         async for chunk in stream:
             if chunk.choices:
                 delta = chunk.choices[0].delta.content or ""
                 if delta:
                     yield delta
-            # 最后一帧 choices 为空、usage 有值——这里可记账（Phase 1 再接 tracing）。
-            # 注：facade 也会汇总；流式成本暂以日志为主。
+            # 末帧 choices 为空、usage 有值 → 回填给调用方
+            if getattr(chunk, "usage", None) and usage_sink is not None:
+                usage_sink.prompt_tokens = chunk.usage.prompt_tokens
+                usage_sink.completion_tokens = chunk.usage.completion_tokens
+                usage_sink.model, usage_sink.provider = model, self.name
+                attach_cost(usage_sink, model)
 
     async def embed(self, texts: list[str]) -> list[list[float]] | None:
         r = await self._client.embeddings.create(model=_EMBED_MODEL, input=texts)

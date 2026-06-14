@@ -78,20 +78,21 @@ class AnthropicProvider:
 
     async def stream(
         self, *, system, messages, model=None, max_tokens=2000,
-        temperature=0.2, timeout=60.0,     # temperature 收下但忽略，保持接口一致
-    ) -> AsyncIterator[str]:
+        temperature=0.2, timeout=60.0, usage_sink=None,      # ← 新增；temperature 仍忽略
+    ):
         model = model or _DEFAULT_MODEL
-        # 用 messages.stream() 助手：text_stream 直接产出文本增量。
         async with self._client.with_options(timeout=timeout).messages.stream(
-            model=model,
-            max_tokens=max_tokens,
-            system=system,
+            model=model, max_tokens=max_tokens, system=system,
             messages=self._to_anthropic_messages(messages),
-            # 不传 temperature；也不开 thinking——逐 token 的 SOAP 流要低首包延迟。
         ) as stream:
             async for text in stream.text_stream:
                 yield text
-            # 如需成本：final = await stream.get_final_message(); final.usage.{input,output}_tokens
+            if usage_sink is not None:
+                final = await stream.get_final_message()      # 流结束后拿终态用量
+                usage_sink.prompt_tokens = final.usage.input_tokens
+                usage_sink.completion_tokens = final.usage.output_tokens
+                usage_sink.model, usage_sink.provider = model, self.name
+                attach_cost(usage_sink, model)
 
     async def embed(self, texts: list[str]) -> list[list[float]] | None:
         # Anthropic 没有 embeddings 接口——向量永远走 OpenAI（见 §3）。

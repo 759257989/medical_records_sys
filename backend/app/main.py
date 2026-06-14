@@ -11,13 +11,16 @@ from app.api.templates import router as templates_router
 from app.api.icd import router as icd_router
 from app.api.admin import router as admin_router
 
+from app.core.observability.tracing import flush as flush_traces
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 启动时：engine 已在 import db.py 时建好（连接池就绪），这里无需额外动作
     yield
     # 关停时：优雅释放连接池
-    await engine.dispose()
+    flush_traces()              # ← 先把 trace 刷出去
+    await engine.dispose()      # 再优雅释放连接池
 
 
 app = FastAPI(title="AI Clinical Scribe", lifespan=lifespan)

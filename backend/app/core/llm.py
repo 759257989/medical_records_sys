@@ -10,10 +10,11 @@ from collections.abc import AsyncIterator
 
 from app.core.config import settings
 from app.core.providers.anthropic_provider import AnthropicProvider
-from app.core.providers.base import ChatProvider, Message, ToolSpec
+from app.core.providers.base import ChatProvider, Message, ToolSpec, Usage
 from app.core.providers.mock_provider import MockProvider
 from app.core.providers.openai_provider import OpenAIProvider
 from app.core.providers.resilience import complete_with_fallback, stream_with_fallback
+from app.core.observability.tracing import trace, record_usage
 
 log = logging.getLogger("llm")
 
@@ -79,38 +80,63 @@ async def generate_soap_stream(
     template_prompt: str | None,
     transcript: str,
     patient,
-    fetch_history,        # async callable () -> list[dict]，由路由层注入（查 RDS）
+    fetch_history,
     has_history: bool,
+    trace_meta: dict | None = None,        # ← 新增：路由层传入 provider_id/encounter_id
 ) -> AsyncIterator[dict]:
-    """逐个产出事件 dict（对外形状与原来一致）。"""
+    trace_meta = trace_meta or {}
     system, messages = _build_system_and_messages(template_prompt, transcript, patient)
 
-    # ── Phase A：复诊患者 → 真发一次强制工具调用，再把历史作为上下文消息追加 ──────────
-    if has_history:
-        try:
-            result = await complete_with_fallback(
-                _CHAIN, system=system, messages=messages,
-                tools=[HISTORY_TOOL], force_tool="get_patient_history", max_tokens=256,
-            )
-            log.info("history tool call via provider=%s cost=$%.5f",
-                     result.provider, result.usage.cost_usd)
-        except Exception as e:                       # noqa: BLE001 工具调用失败不该拖垮生成
-            log.warning("history tool phase failed, proceeding without it: %s", e)
+    # ── 一次生成 = 一条 trace ──────────────────────────────────────────────────
+    with trace(
+        "generate_soap",
+        user_id=trace_meta.get("provider_id"),
+        session_id=trace_meta.get("encounter_id"),
+        tags=["soap", settings.prompt_version],
+        metadata={"prompt_version": settings.prompt_version, "has_history": has_history},
+        input={"transcript": transcript[:1000]},
+    ) as root:
 
-        history = await fetch_history()              # 真去 RDS 查
-        n = len(history)
-        yield {"type": "tool",
-               "label": f"Prior encounter history retrieved and incorporated "
-                        f"({n} previous visit{'s' if n != 1 else ''})."}
-        # provider 无关地把历史注入下一轮上下文（见手册 §3 (A)）。
-        messages.append(Message(
-            role="user",
-            content="Relevant prior encounter history (JSON):\n" + json.dumps(history),
-        ))
+        # ── Phase A：复诊 → 强制工具调用（记成一个 generation）────────────────────
+        if has_history:
+            with root.generation("history_tool_call", model="gpt-4o",
+                                 input={"tool": "get_patient_history"}) as gen:
+                try:
+                    result = await complete_with_fallback(
+                        _CHAIN, system=system, messages=messages,
+                        tools=[HISTORY_TOOL], force_tool="get_patient_history", max_tokens=256,
+                    )
+                    record_usage(gen, output=[tc.name for tc in result.tool_calls],
+                                 usage=result.usage)
+                except Exception as e:                      # noqa: BLE001
+                    log.warning("history tool phase failed, proceeding without it: %s", e)
 
-    # ── Phase B：流式产出 SOAP（带跨 provider fallback）────────────────────────────
-    async for delta in stream_with_fallback(_CHAIN, system=system, messages=messages):
-        yield {"type": "text", "content": delta}
+            history = await fetch_history()
+            with root.span("fetch_patient_history") as sp:    # 查库记成一个普通 span
+                sp.update(output={"visits": len(history)})
+
+            n = len(history)
+            yield {"type": "tool",
+                   "label": f"Prior encounter history retrieved and incorporated "
+                            f"({n} previous visit{'s' if n != 1 else ''})."}
+            messages.append(Message(
+                role="user",
+                content="Relevant prior encounter history (JSON):\n" + json.dumps(history),
+            ))
+
+        # ── Phase B：流式产出（记成一个 generation，回填流式用量）────────────────
+        usage = Usage()
+        parts: list[str] = []
+        with root.generation("soap_generation",
+                             input={"messages": [m.content for m in messages]}) as gen:
+            async for delta in stream_with_fallback(
+                _CHAIN, system=system, messages=messages, usage_sink=usage,
+            ):
+                parts.append(delta)
+                yield {"type": "text", "content": delta}
+            record_usage(gen, output="".join(parts), usage=usage)
+
+        root.update_trace(output={"chars": len("".join(parts))})
 
 
 # ── 向量（ICD 搜索用）——永远走 OpenAI；无 key 返回 None（icd.py 有关键词回退）───────
