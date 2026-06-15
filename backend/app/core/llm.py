@@ -51,33 +51,41 @@ HISTORY_TOOL = ToolSpec(
     parameters={"type": "object", "properties": {}, "required": []},
 )
 
+# llm.py —— 用一个 {名字: provider} 注册表，支持"指定谁当主力"
+def _build_providers() -> dict[str, ChatProvider]:
+    providers: dict[str, ChatProvider] = {}
+    if settings.openai_api_key:
+        providers["openai"] = OpenAIProvider(settings.openai_api_key)
+    if settings.anthropic_api_key:
+        providers["anthropic"] = AnthropicProvider(settings.anthropic_api_key)
+    providers["mock"] = MockProvider()              # 永远兜底
+    return providers
+
+_PROVIDERS = _build_providers()
+# 默认链(champion 优先)：openai → anthropic → mock，给 embed/judge 等复用
+_CHAIN = [p for n in ("openai", "anthropic", "mock") if (p := _PROVIDERS.get(n))]
 
 # ── 按已配置的 key 组装 fallback 链：OpenAI → Anthropic → Mock ───────────────────
-def _build_chain() -> list[ChatProvider]:
-    chain: list[ChatProvider] = []
-    if settings.openai_api_key:
-        chain.append(OpenAIProvider(settings.openai_api_key))
-    if settings.anthropic_api_key:
-        chain.append(AnthropicProvider(settings.anthropic_api_key))
-    chain.append(MockProvider())     # 永远兜底，保证不硬崩
-    return chain
+def build_chain(primary: str | None = None) -> list[ChatProvider]:
+    """把 primary 排到 fallback 链最前；其余 provider 仍作为回退兜底。"""
+    if not primary or primary not in _PROVIDERS:
+        return _CHAIN
+    rest = [p for n, p in _PROVIDERS.items() if n != primary]
+    return [_PROVIDERS[primary], *rest]
 
 
-_CHAIN = _build_chain()
 # embeddings 只走 OpenAI（Anthropic 没有该接口）。
 _EMBED_PROVIDER = OpenAIProvider(settings.openai_api_key) if settings.openai_api_key else MockProvider()
 
 
-def _build_system_and_messages(template_prompt, transcript, patient):
-     # template_prompt(每次就诊的自定义模板)优先；否则用版本化的默认 persona。
+def _build_system_and_messages(template_prompt, transcript, patient, version=None):
     if template_prompt:
         persona = template_prompt
     else:
         try:
-            persona = prompt_registry.load()             # 按 settings.prompt_version 读
+            persona = prompt_registry.load(version)      # ← 用治理解析出的版本
         except FileNotFoundError:
-            persona = DEFAULT_PERSONA                     # 兜底：文件缺失也不崩
-    # OUTPUT_CONTRACT 是不变量，始终附加(无论用哪个 persona)
+            persona = DEFAULT_PERSONA
     system = persona + "\n\n" + OUTPUT_CONTRACT
     user = (
         f"Patient: {patient.first_name} {patient.last_name}, DOB {patient.dob}.\n\n"
@@ -87,23 +95,23 @@ def _build_system_and_messages(template_prompt, transcript, patient):
 
 
 async def generate_soap_stream(
-    template_prompt: str | None,
-    transcript: str,
-    patient,
-    fetch_history,
-    has_history: bool,
-    trace_meta: dict | None = None,        # ← 新增：路由层传入 provider_id/encounter_id
-) -> AsyncIterator[dict]:
+    template_prompt, transcript, patient, fetch_history, has_history,
+    trace_meta=None,
+    prompt_version: str | None = None,      # ← 新增：用哪个 prompt 版本
+    primary_provider: str | None = None,    # ← 新增：哪个 provider 当主力(champion/challenger)
+):
     trace_meta = trace_meta or {}
-    system, messages = _build_system_and_messages(template_prompt, transcript, patient)
+    system, messages = _build_system_and_messages(template_prompt, transcript, patient, prompt_version)
+    chain = build_chain(primary_provider)   # ← 按治理决策构链；未指定则用默认 _CHAIN
 
-    # ── 一次生成 = 一条 trace ──────────────────────────────────────────────────
     with trace(
         "generate_soap",
         user_id=trace_meta.get("provider_id"),
         session_id=trace_meta.get("encounter_id"),
-        tags=["soap", settings.prompt_version],
-        metadata={"prompt_version": settings.prompt_version, "has_history": has_history},
+        # tags 里带上 版本 和 arm —— Phase 1 的 Langfuse 里就能按它们分组对比 A/B
+        tags=["soap", prompt_version or settings.prompt_version, trace_meta.get("model_arm", "champion")],
+        metadata={"prompt_version": prompt_version or settings.prompt_version,
+                  "model_arm": trace_meta.get("model_arm"), "has_history": has_history},
         input={"transcript": transcript[:1000]},
     ) as root:
 
@@ -113,7 +121,7 @@ async def generate_soap_stream(
                                  input={"tool": "get_patient_history"}) as gen:
                 try:
                     result = await complete_with_fallback(
-                        _CHAIN, system=system, messages=messages,
+                        chain, system=system, messages=messages,
                         tools=[HISTORY_TOOL], force_tool="get_patient_history", max_tokens=256,
                     )
                     record_usage(gen, output=[tc.name for tc in result.tool_calls],
@@ -140,7 +148,7 @@ async def generate_soap_stream(
         with root.generation("soap_generation",
                              input={"messages": [m.content for m in messages]}) as gen:
             async for delta in stream_with_fallback(
-                _CHAIN, system=system, messages=messages, usage_sink=usage,
+                chain, system=system, messages=messages, usage_sink=usage,
             ):
                 parts.append(delta)
                 yield {"type": "text", "content": delta}

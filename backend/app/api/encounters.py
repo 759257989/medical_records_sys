@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_owned_encounter
+from app.core import governance
 from app.core.db import get_db
 from app.core.llm import generate_soap_stream
 from app.models.encounter import Encounter
@@ -191,6 +192,13 @@ async def generate(
 
     patient = await db.get(Patient, encounter.patient_id)
     has_history = (await _history_count(db, patient.id, encounter.id)) > 0
+
+    # ── 治理解析：这次生成用哪个 prompt 版本、走哪个模型 arm（提交前解析）──
+    prompt_version = await governance.resolve_prompt_version(db)
+    primary_provider, model_arm = await governance.resolve_model_arm(
+        db, task="soap", key=str(encounter.provider_id),   # 按医生粘性分流
+    )
+
     await db.commit()
 
     # 闭包：工具被调用时才真正去查历史（在生成期间发生）
@@ -202,10 +210,14 @@ async def generate(
     async def event_stream():
         try:
             async for ev in generate_soap_stream(
-                template_prompt, body.transcript, patient, fetch_history, has_history, trace_meta={                                  # ← 新增这一段
+                template_prompt, body.transcript, patient, fetch_history, has_history,
+                trace_meta={
                     "provider_id": str(encounter.provider_id),
                     "encounter_id": str(encounter.id),
+                    "model_arm": model_arm,                 # ← 进 trace，便于 A/B 归因
                 },
+                prompt_version=prompt_version,              # ← 治理决策
+                primary_provider=primary_provider,          # ← 治理决策
             ):
                 yield f"data: {json.dumps(ev)}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"

@@ -19,6 +19,11 @@ from app.schemas.admin import (
     ActiveUpdate, ProviderCreate, ProviderOut,
     TemplateCreate, TemplateFull, TemplateUpdate,
 )
+# app/api/admin.py 追加
+from app.models.prompt_version import PromptVersion
+from app.models.model_routing import ModelRouting
+from app.schemas.admin import PromptVersionOut, ModelRoutingOut, ModelRoutingUpdate
+from app.api.deps import get_current_user
 
 # dependencies=[Depends(require_admin)] 让该 router 下每个端点都自动鉴权
 router = APIRouter(prefix="/api/admin", tags=["admin"], dependencies=[Depends(require_admin)])
@@ -186,6 +191,108 @@ async def delete_template(
     write_audit(db, admin, "delete_template", "template", t.id, {"name": t.name})
     await db.commit()
     return {"ok": True}
+
+
+# ── 治理：prompt 版本注册表 + eval-gated 晋升 / 回滚 ──────────────────────────────
+# 晋升闸门看的指标(都是"越大越好")
+GATE_KEYS = ["structured_output.pass_rate", "faithfulness.faithful_rate", "task_success.pass_rate"]
+
+
+@router.get("/prompts", response_model=list[PromptVersionOut])
+async def list_prompt_versions(db: AsyncSession = Depends(get_db)):
+    rows = (await db.execute(select(PromptVersion).order_by(PromptVersion.name))).scalars().all()
+    return rows
+
+
+@router.post("/prompts/{name}/promote", response_model=PromptVersionOut)
+async def promote_prompt(
+    name: str,
+    admin: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    candidate = await db.scalar(select(PromptVersion).where(PromptVersion.name == name))
+    if candidate is None or candidate.scorecard is None:
+        raise HTTPException(400, "该版本不存在或还没有评分卡(先跑 score_version)")
+
+    current = await db.scalar(select(PromptVersion).where(PromptVersion.status == "production"))
+
+    # ── eval-gate：逐指标对比候选 vs 现任 champion ──
+    deltas, blocked = {}, []
+    champ_sc = (current.scorecard if current else {}) or {}
+    for k in GATE_KEYS:
+        c = candidate.scorecard.get(k)
+        ch = champ_sc.get(k)
+        if c is None:
+            continue
+        if ch is not None:
+            deltas[k] = round(c - ch, 3)
+            if c < ch:                              # 任一指标退步 → 拦截
+                blocked.append(k)
+    if blocked:
+        raise HTTPException(409, f"晋升被拦截：以下指标低于现任 production {blocked}；delta={deltas}")
+
+    # ── 通过：旧 production 降 staged，候选升 production ──
+    if current and current.id != candidate.id:
+        current.status = "staged"
+    candidate.status = "production"
+    write_audit(db, admin, "promote_prompt", "prompt_version", candidate.id, {
+        "from": current.name if current else None, "to": candidate.name, "eval_delta": deltas,
+    })
+    await db.commit()
+    await db.refresh(candidate)
+    return candidate
+
+
+@router.post("/prompts/{name}/rollback", response_model=PromptVersionOut)
+async def rollback_prompt(
+    name: str,
+    admin: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """一键把 production 拨到指定(通常是上一个绿色)版本——回滚不走 eval-gate(救火优先)。"""
+    target = await db.scalar(select(PromptVersion).where(PromptVersion.name == name))
+    if target is None:
+        raise HTTPException(404, "版本不存在")
+    current = await db.scalar(select(PromptVersion).where(PromptVersion.status == "production"))
+    if current and current.id != target.id:
+        current.status = "staged"
+    target.status = "production"
+    write_audit(db, admin, "rollback_prompt", "prompt_version", target.id, {
+        "from": current.name if current else None, "to": target.name,
+    })
+    await db.commit()
+    await db.refresh(target)
+    return target
+
+
+# ── 模型路由：查看 / 更新 champion/challenger/canary ──
+@router.get("/model-routing", response_model=ModelRoutingOut)
+async def get_routing(db: AsyncSession = Depends(get_db)):
+    row = await db.scalar(select(ModelRouting).where(ModelRouting.task == "soap"))
+    if row is None:                                 # 没配过 → 返回默认(不写库)
+        return ModelRoutingOut(task="soap", champion="openai", challenger=None, canary_pct=0)
+    return row
+
+
+@router.put("/model-routing", response_model=ModelRoutingOut)
+async def update_routing(
+    body: ModelRoutingUpdate,
+    admin: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not (0 <= body.canary_pct <= 100):
+        raise HTTPException(400, "canary_pct 必须在 0~100")
+    row = await db.scalar(select(ModelRouting).where(ModelRouting.task == "soap"))
+    if row is None:
+        row = ModelRouting(task="soap")
+        db.add(row)
+    row.champion, row.challenger, row.canary_pct = body.champion, body.challenger, body.canary_pct
+    write_audit(db, admin, "update_routing", "model_routing", row.id, {
+        "champion": row.champion, "challenger": row.challenger, "canary_pct": row.canary_pct,
+    })
+    await db.commit()
+    await db.refresh(row)
+    return row
 
 
 # ── VER-5：审计日志查看 ───────────────────────────────────────────────────────

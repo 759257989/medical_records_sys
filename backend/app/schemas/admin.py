@@ -54,3 +54,22 @@ class TemplateFull(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    
+# app/schemas/admin.py 追加
+class PromptVersionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    name: str
+    status: str
+    scorecard: dict | None = None
+
+class ModelRoutingOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    task: str
+    champion: str
+    challenger: str | None
+    canary_pct: int
+
+class ModelRoutingUpdate(BaseModel):
+    champion: str
+    challenger: str | None = None
+    canary_pct: int = 0
