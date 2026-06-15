@@ -1,0 +1,24 @@
+# backend/evals/promptfoo/promptfooconfig.yaml
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+description: MedNote SOAP prompt regression — prompt versions × models
+
+# prompts 列多个 → 形成矩阵的一个维度(prompt 版本)
+prompts:
+  - id: file://prompts/soap_v1.json
+    label: soap_v1
+  - id: file://prompts/soap_v2.json
+    label: soap_v2
+
+# providers 列多个 → 矩阵的另一个维度(模型)
+# 注意：claude-opus-4-8 不接受 temperature/top_p(会 400)，所以这里都不设采样参数。
+providers:
+  - openai:gpt-4o
+  - anthropic:messages:claude-opus-4-8
+  # 想让 CI 又快又便宜，可换成更小的模型：
+  # - openai:gpt-4o-mini
+  # - anthropic:messages:claude-haiku-4-5
+
+# 从外部文件加载测试用例
+tests: file://tests.yaml
+
+outputPath: ../results/promptfoo_result.html   # 跑完生成可视化对比表

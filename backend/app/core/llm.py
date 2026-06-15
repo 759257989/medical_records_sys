@@ -15,6 +15,7 @@ from app.core.providers.mock_provider import MockProvider
 from app.core.providers.openai_provider import OpenAIProvider
 from app.core.providers.resilience import complete_with_fallback, stream_with_fallback
 from app.core.observability.tracing import trace, record_usage
+from app.core import prompts as prompt_registry 
 
 log = logging.getLogger("llm")
 
@@ -68,7 +69,16 @@ _EMBED_PROVIDER = OpenAIProvider(settings.openai_api_key) if settings.openai_api
 
 
 def _build_system_and_messages(template_prompt, transcript, patient):
-    system = (template_prompt or DEFAULT_PERSONA) + "\n\n" + OUTPUT_CONTRACT
+     # template_prompt(每次就诊的自定义模板)优先；否则用版本化的默认 persona。
+    if template_prompt:
+        persona = template_prompt
+    else:
+        try:
+            persona = prompt_registry.load()             # 按 settings.prompt_version 读
+        except FileNotFoundError:
+            persona = DEFAULT_PERSONA                     # 兜底：文件缺失也不崩
+    # OUTPUT_CONTRACT 是不变量，始终附加(无论用哪个 persona)
+    system = persona + "\n\n" + OUTPUT_CONTRACT
     user = (
         f"Patient: {patient.first_name} {patient.last_name}, DOB {patient.dob}.\n\n"
         f"Encounter transcript / clinical observations:\n{transcript}"

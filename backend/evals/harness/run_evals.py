@@ -31,14 +31,14 @@ def _load_jsonl(path) -> list[dict]:
 
 
 def _flatten(scores: dict) -> dict:
-    """把嵌套结果拍平成 'suite.metric' → value，方便和 THRESHOLDS 对照。"""
-    return {
+    flat = {
         "structured_output.pass_rate": scores["structured_output"]["pass_rate"],
         "faithfulness.faithful_rate": scores["faithfulness"]["faithful_rate"],
         "task_success.pass_rate": scores["task_success"]["pass_rate"],
         "rag.recall_at_8": scores["rag"]["recall_at_8"],
         "rag.hit_rate_at_8": scores["rag"]["hit_rate_at_8"],
     }
+    return {k: v for k, v in flat.items() if v is not None}   # None → 不纳入门禁
 
 
 def _write_markdown(flat: dict, scores: dict, meta: dict) -> str:
@@ -66,10 +66,25 @@ def _write_markdown(flat: dict, scores: dict, meta: dict) -> str:
     return "\n".join(lines)
 
 
-async def main(check: bool) -> int:
+async def main(check: bool, no_rag: bool, limit: int) -> int:
     soap_cases = _load_jsonl(SOAP_GOLDEN)
     icd_cases = _load_jsonl(ICD_GOLDEN)
-
+    if limit:                                   # CI：只取前 N 条，秒级反馈
+        soap_cases, icd_cases = soap_cases[:limit], icd_cases[:limit]
+    
+    # 把 rag 改成可跳过：
+    if no_rag:
+        rag = {"recall_at_8": None, "hit_rate_at_8": None, "mrr": None,
+               "total": 0, "misses": []}
+        faith, task = await asyncio.gather(
+            faithfulness.run(generated), task_success.run(generated),
+        )
+    else:
+        faith, task, rag = await asyncio.gather(
+            faithfulness.run(generated), task_success.run(generated),
+            rag_eval.run(icd_cases),
+        )
+    
     # 提示：只有 mock 的话，分数没有意义
     provider_names = [p.name for p in _CHAIN]
     if provider_names == ["mock"]:
@@ -122,5 +137,9 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true",
                     help="任一指标低于阈值则以非零码退出(CI 用)")
+    ap.add_argument("--no-rag", action="store_true",
+                    help="跳过 rag 套件(CI 无向量数据库时用)")
+    ap.add_argument("--limit", type=int, default=0,
+                    help="只取前 N 条用例(0=全部)；CI 用小样本快速反馈")
     args = ap.parse_args()
-    sys.exit(asyncio.run(main(args.check)))
+    sys.exit(asyncio.run(main(args.check, args.no_rag, args.limit)))

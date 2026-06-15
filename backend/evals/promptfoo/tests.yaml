@@ -1,0 +1,25 @@
+# backend/evals/promptfoo/tests.yaml
+# 每个 test 一条 transcript + 一组断言。断言对“每个 prompt×模型 组合”的输出分别执行。
+- vars:
+    transcript: >
+      58-year-old male here for follow-up of hypertension. Good adherence to
+      lisinopril. Home BP around 130/82. In clinic BP 134/84, HR 72. Continue
+      lisinopril 10mg daily, recheck in 3 months.
+  assert:
+    - type: icontains-all                 # 4 个段落标记必须都在(确定性)
+      value: ["###SUBJECTIVE###", "###OBJECTIVE###", "###ASSESSMENT###", "###PLAN###"]
+    - type: regex                         # 至少一条 ICD 行(不依赖多行锚点，跨 Node 版本稳妥)
+      value: "- [A-Z][0-9][0-9A-Z](\\.[0-9A-Z]{1,4})?: "
+    - type: llm-rubric                    # LLM 裁判：接地 + 不幻觉
+      value: >
+        The note is faithful to the transcript and introduces no clinical facts
+        (diagnoses, meds, vitals) that are absent from it.
+
+- vars:
+    transcript: >
+      Hi doc, just stopping by to say hello, nothing wrong today. See you next time!
+  assert:
+    - type: icontains                     # 寒暄输入：应判 INSUFFICIENT
+      value: "###INSUFFICIENT###"
+    - type: not-icontains                 # 且不能硬编出 SOAP 段落
+      value: "###SUBJECTIVE###"
