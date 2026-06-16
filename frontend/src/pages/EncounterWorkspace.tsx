@@ -208,6 +208,11 @@ export default function EncounterWorkspace() {
             <button className="primary" disabled={generating || !transcript.trim()} onClick={generate}>
               {generating ? "Generating…" : "Generate Note"}
             </button>
+            <button className="ghost" disabled={!transcript.trim()}
+              onClick={() => nav(`/agent?id=${encounter.id}`)}
+              title="Run the multi-step chart-review agent">
+              Chart Review Agent
+            </button>
             {draftSaved && <span className="muted">Draft saved {draftSaved}</span>}
           </div>
         </section>

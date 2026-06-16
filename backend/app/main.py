@@ -12,11 +12,13 @@ from app.api.icd import router as icd_router
 from app.api.admin import router as admin_router
 
 from app.core.observability.tracing import flush as flush_traces
+from app.agent.checkpointer import ensure_setup
+from app.api import agent as agent_api
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 启动时：engine 已在 import db.py 时建好（连接池就绪），这里无需额外动作
+    await ensure_setup()         # 一次性建好 langgraph 检查点表（幂等，已存在则跳过）
     yield
     # 关停时：优雅释放连接池
     flush_traces()              # ← 先把 trace 刷出去
@@ -24,11 +26,12 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="AI Clinical Scribe", lifespan=lifespan)
-app.include_router(auth_router)    
-app.include_router(encounters_router) 
-app.include_router(templates_router)  
+app.include_router(auth_router)
+app.include_router(encounters_router)
+app.include_router(templates_router)
 app.include_router(icd_router)
 app.include_router(admin_router)
+app.include_router(agent_api.router)
 
 
 
