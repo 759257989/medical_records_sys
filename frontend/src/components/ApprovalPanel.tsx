@@ -49,9 +49,7 @@ export default function ApprovalPanel({ runId, codes, draft, onEvent, onError }:
           <li key={c.code} onClick={() => toggle(c.code)} title="Click to keep / drop">
             <input type="checkbox" readOnly checked={keep.has(c.code)} />
             <code>{c.code}</code>
-            <span className="desc">
-              {c.confidence === null ? "no retrieval match" : `score ${c.confidence.toFixed(2)}`}
-            </span>
+            <span className="desc">{c.description || "—"}</span>
           </li>
         ))}
       </ul>

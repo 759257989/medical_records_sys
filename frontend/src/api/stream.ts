@@ -59,7 +59,7 @@ export async function streamSoap(
 // ── Agent 事件流 ────────────────────────────────────────────────────────────────
 // chart-review agent 的 SSE 比上面的 SOAP 流复杂：节点进度、审批闸门、终稿都走同一条流。
 // 这里只负责"把字节流切成一个个 JSON 事件并回调"，具体怎么渲染由页面决定。
-export type CodeHit = { code: string; confidence: number | null; low_confidence: boolean };
+export type CodeHit = { code: string; description?: string; confidence: number | null; low_confidence: boolean };
 
 export type AgentEvent =
   | { type: "run_started"; run_id: string }

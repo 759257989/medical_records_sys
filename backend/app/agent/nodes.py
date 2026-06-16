@@ -73,7 +73,7 @@ from app.core.providers.resilience import complete_with_fallback
 
 MAX_REVISIONS = 2          # 自我批评最多回环 2 次(防死循环的"软"上限)
 CONFIDENCE_MIN = 0.5       # ICD 检索分数低于此 → 视为低置信度，需人审
-ICD_LINE = re.compile(r"- ([A-Z][0-9][0-9A-Z](?:\.[0-9A-Z]{1,4})?):")
+ICD_LINE = re.compile(r"- ([A-Z][0-9][0-9A-Z](?:\.[0-9A-Z]{1,4})?): *(.*)")  # 组1=编码 组2=描述
 
 
 # ── plan：决定路径(工具选择的雏形)——有既往史才去取，否则跳过 ────────────────────
@@ -155,8 +155,12 @@ async def assign_codes(state: AgentState) -> dict:
         code = m.group(1)
         cand = by_code.get(code)                          # 草稿里的编码是否在检索候选里？
         score = cand["score"] if cand and cand.get("score") is not None else None
+        # 名称：优先用检索候选里的规范描述，否则退回草稿行里模型写的描述
+        description = (cand["description"] if cand and cand.get("description")
+                       else (m.group(2) or "").strip())
         low = (score is None) or (score < CONFIDENCE_MIN) # 没检索到 / 分数低 → 低置信
-        assigned.append({"code": code, "confidence": score, "low_confidence": low})
+        assigned.append({"code": code, "description": description,
+                         "confidence": score, "low_confidence": low})
     return {"assigned_codes": assigned}
 
 

@@ -1,6 +1,6 @@
 // frontend/src/pages/EncounterWorkspace.tsx
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/client";
 import { streamSoap } from "../api/stream";
 import { EMPTY_SOAP, parseSoap, type Soap } from "../lib/soap";
@@ -17,6 +17,7 @@ export default function EncounterWorkspace() {
   const [params] = useSearchParams();
   const resumeId = params.get("id");   // ?id= means resume an existing encounter
   const nav = useNavigate();
+  const location = useLocation();      // 可能携带 Copilot Review 跳转过来的终稿
 
   const [templates, setTemplates] = useState<Template[]>([]);
   const [form, setForm] = useState({ first_name: "", last_name: "", dob: "", template_id: "" });
@@ -57,6 +58,15 @@ export default function EncounterWorkspace() {
       };
       const vr = await api.get<Version[]>(`/encounters/${e.id}/notes`);
       setVersions(vr.data);
+      // 若来自 Copilot Review 的跳转：终稿优先，解析 ###标记### 文本后直接填充编辑器
+      const agentNote = (location.state as { agentNote?: string } | null)?.agentNote;
+      if (agentNote) {
+        setSoap(parseSoap(agentNote));
+        flash("Loaded from Copilot Review — review and Save");
+        window.history.replaceState({}, "");   // 清掉路由 state，避免刷新时重复覆盖
+        return;
+      }
+
       const empty = !wnSoap.subjective && !wnSoap.objective && !wnSoap.assessment && !wnSoap.plan;
       if (empty && vr.data.length > 0) {
         const v = vr.data[0];   // latest version (list is in descending order)
@@ -206,12 +216,12 @@ export default function EncounterWorkspace() {
             value={transcript} onChange={(e) => setTranscript(e.target.value)} />
           <div className="row-between">
             <button className="primary" disabled={generating || !transcript.trim()} onClick={generate}>
-              {generating ? "Generating…" : "Generate Note"}
+              {generating ? "Drafting…" : "Quick Draft"}
             </button>
             <button className="ghost" disabled={!transcript.trim()}
               onClick={() => nav(`/agent?id=${encounter.id}`)}
-              title="Run the multi-step chart-review agent">
-              Chart Review Agent
+              title="Run the multi-step AI copilot: retrieves history, drafts, self-reviews, and flags low-confidence ICD codes for your approval">
+              Copilot Review
             </button>
             {draftSaved && <span className="muted">Draft saved {draftSaved}</span>}
           </div>

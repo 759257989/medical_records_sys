@@ -40,6 +40,7 @@ function describeStep(ev: Extract<AgentEvent, { type: "step" }>): string {
 export default function AgentRun() {
   const { user, logout } = useAuth();
   const [params] = useSearchParams();
+  const nav = useNavigate();
   const encounterId = params.get("id");
 
   const [transcript, setTranscript] = useState("");
@@ -75,7 +76,7 @@ export default function AgentRun() {
         break;
       case "done":
         setApproval(null);            // 恢复跑完 → 收起审批面板
-        setFinalNote(ev.final_note);
+        setFinalNote(ev.final_note);  // 展示终稿，等医生手动点"返回编辑器"再回填
         setApprovedCodes(ev.approved_codes);
         setRunning(false);
         break;
@@ -101,13 +102,18 @@ export default function AgentRun() {
     }
   };
 
+  // 医生手动点击才返回工作台，并把 Copilot 终稿带回去填充 SOAP 编辑器
+  const returnToEditor = () => {
+    if (encounterId) nav(`/encounter?id=${encounterId}`, { state: { agentNote: finalNote } });
+  };
+
   if (!encounterId) {
     return (
       <div className="page">
         <Topbar user={user} logout={logout} />
         <main className="content">
           <div className="card wide">
-            <h2>Chart Review Agent</h2>
+            <h2>Copilot Review</h2>
             <p className="hint">Open this page from an encounter to run the agent.</p>
           </div>
         </main>
@@ -126,8 +132,9 @@ export default function AgentRun() {
             placeholder="Paste the visit transcript…"
             value={transcript} onChange={(e) => setTranscript(e.target.value)} />
           <div className="row-between">
+            <span className="muted">Multi-step review with human approval</span>
             <button className="primary" disabled={running || !transcript.trim()} onClick={run}>
-              {running ? "Running…" : "Run Agent"}
+              {running ? "Running…" : "Run Copilot Review"}
             </button>
           </div>
           {error && (
@@ -135,20 +142,11 @@ export default function AgentRun() {
           )}
         </section>
 
-        {/* 中：执行时间线 */}
+        {/* 中：Copilot 终稿 + 手动返回 + 低置信编码审批 */}
         <section className="panel">
-          <div className="panel-head"><h3>Agent Timeline</h3></div>
-          {timeline.length === 0 && <p className="muted">No steps yet. Run the agent to begin.</p>}
-          <ul className="versions">
-            {timeline.map((item, i) => (
-              <li key={i}>
-                <strong>{NODE_LABEL[item.node] ?? item.node}</strong>
-                {item.detail && <span className="vmeta">{item.detail}</span>}
-              </li>
-            ))}
-          </ul>
+          <div className="panel-head"><h3>Copilot Note</h3></div>
 
-          {/* 审批闸门：低置信编码逐条让医生勾选保留/驳回（恢复后的事件经 handleEvent 回流） */}
+          {/* 审批闸门：暂停时出现，医生逐条勾选保留/驳回低置信编码 */}
           {approval && (
             <ApprovalPanel
               runId={runId}
@@ -158,12 +156,11 @@ export default function AgentRun() {
               onError={setError}
             />
           )}
-        </section>
 
-        {/* 右：终稿 + 最终编码 */}
-        <aside className="panel narrow">
-          <div className="panel-head"><h3>Final Note</h3></div>
-          {!finalNote && <p className="muted">Final note appears here once the agent completes.</p>}
+          {!finalNote && !approval && (
+            <p className="muted">Copilot note appears here once the review completes.</p>
+          )}
+
           {finalNote && (
             <>
               <pre className="generated" style={{ whiteSpace: "pre-wrap" }}>{finalNote}</pre>
@@ -176,8 +173,27 @@ export default function AgentRun() {
                   </li>
                 ))}
               </ul>
+              {/* 右下角：医生确认 → 回工作台并回填 SOAP（不点不跳转） */}
+              <div className="row-between">
+                <span className="muted">Confirm to fill the SOAP note in the editor</span>
+                <button className="primary" onClick={returnToEditor}>Confirm</button>
+              </div>
             </>
           )}
+        </section>
+
+        {/* 右：执行时间线（紧凑，靠右） */}
+        <aside className="panel narrow">
+          <div className="panel-head"><h3>Agent Timeline</h3></div>
+          {timeline.length === 0 && <p className="muted">No steps yet.</p>}
+          <ul className="versions">
+            {timeline.map((item, i) => (
+              <li key={i}>
+                <strong>{NODE_LABEL[item.node] ?? item.node}</strong>
+                {item.detail && <span className="vmeta">{item.detail}</span>}
+              </li>
+            ))}
+          </ul>
         </aside>
       </main>
     </div>
