@@ -18,6 +18,10 @@ from app.models.user import User
 from app.schemas.encounter import DraftSave, EncounterCreate, GenerateRequest
 from app.schemas.note import NoteSave
 
+from fastapi import Request, Response
+from app.core.ratelimit import limiter
+from app.core.config import settings
+
 router = APIRouter(prefix="/api/encounters", tags=["encounters"])
 
 
@@ -177,7 +181,10 @@ async def save_draft(
 
 # ── ② 流式生成 SOAP（含历史注入）─────────────────────────────────────────────
 @router.post("/{encounter_id}/generate")
+@limiter.limit(settings.rate_limit_generate) 
 async def generate(
+    request: Request,
+    response: Response,
     body: GenerateRequest,
     encounter: Encounter = Depends(get_owned_encounter),
     db: AsyncSession = Depends(get_db),

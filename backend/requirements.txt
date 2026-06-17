@@ -17,3 +17,5 @@ tenacity>=8.2
 langfuse>=3.0
 langgraph>=1.0                       # 状态图编排
 langgraph-checkpoint-postgres>=2.0   # Postgres 持久化检查点(依赖已装的 psycopg3)
+slowapi>=0.1.9        # FastAPI 限流(基于 limits 库)
+redis>=5.0 

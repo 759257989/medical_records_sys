@@ -9,11 +9,17 @@ from app.core.security import create_access_token, verify_password
 from app.models.user import User
 from app.schemas.auth import LoginRequest, TokenResponse, UserOut
 
+from fastapi import Request, Response
+from slowapi.util import get_remote_address
+from app.core.ratelimit import limiter
+from app.core.config import settings
+
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
+@limiter.limit(settings.rate_limit_login, key_func=get_remote_address)  
+async def login(request: Request, response: Response, body: LoginRequest, db: AsyncSession = Depends(get_db)):
     user = await db.scalar(select(User).where(User.email == body.email.lower()))
     # 注意：用户不存在和密码错误返回同样的错误，避免“撞库”探测出哪些邮箱存在
     if not user or not verify_password(body.password, user.password_hash):

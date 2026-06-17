@@ -12,6 +12,11 @@ from app.core.db import get_db
 from app.models.encounter import Encounter
 from app.models.user import User
 from app.schemas.agent import ApproveBody, StartRunBody
+from fastapi import Request, Response
+from slowapi.util import get_remote_address
+from app.core.ratelimit import limiter
+from app.core.config import settings
+
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
 
@@ -26,7 +31,10 @@ def _sse(events):
 
 # ── 开跑：为某次就诊启动一次 chart-review ──────────────────────────────────────
 @router.post("/encounters/{encounter_id}/runs")
+@limiter.limit(settings.rate_limit_agent)
 async def start_run(
+    request: Request,
+    response: Response,
     body: StartRunBody,
     encounter: Encounter = Depends(get_owned_encounter),   # 复用：校验这次就诊属于当前医生
     db: AsyncSession = Depends(get_db),

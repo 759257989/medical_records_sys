@@ -10,11 +10,18 @@ from app.models.icd import Icd10Code
 from app.models.user import User
 from app.core.observability.tracing import span as obs_span
 
+from fastapi import Request, Response
+from app.core.ratelimit import limiter
+from app.core.config import settings
+
 router = APIRouter(prefix="/api/icd10", tags=["icd10"])
 
 
 @router.get("/search")
+@limiter.limit(settings.rate_limit_icd)
 async def search_icd(
+    request: Request,
+    response: Response,
     q: str = Query(..., min_length=1),
     _user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

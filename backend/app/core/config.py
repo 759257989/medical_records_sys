@@ -17,7 +17,13 @@ class Settings(BaseSettings):
     langfuse_secret_key: str = ""
     langfuse_host: str = "http://localhost:3000"   # Cloud 则填 https://cloud.langfuse.com
     prompt_version: str = "soap_v1"                # prompt 版本标签（为 Phase 3/4 治理埋点）
-
+    # 限流存储：留空 → 用进程内内存(单实例够用)；填 redis://host:port/db → 多实例共享
+    redis_url: str = ""
+    # 各接口的限流额度(可按需调)
+    rate_limit_generate: str = "10/minute"   # SOAP 生成：贵，收紧 每 1 分钟 最多 10 次
+    rate_limit_agent: str = "5/minute"       # agent 运行：更贵
+    rate_limit_icd: str = "60/minute"        # ICD 检索：便宜，放宽
+    rate_limit_login: str = "5/minute"       # 登录：按 IP，防爆破
 
 def _hydrate_from_secrets_manager() -> None:
     """生产环境：从 Secrets Manager 拉密钥并写入环境变量，
