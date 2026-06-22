@@ -22,6 +22,10 @@ from fastapi import Request, Response
 from app.core.ratelimit import limiter
 from app.core.config import settings
 
+from fastapi import HTTPException
+from app.core.security import guard
+from app.models.audit import AuditLog 
+
 router = APIRouter(prefix="/api/encounters", tags=["encounters"])
 
 
@@ -189,6 +193,19 @@ async def generate(
     encounter: Encounter = Depends(get_owned_encounter),
     db: AsyncSession = Depends(get_db),
 ):
+    # ── 输入护栏：提交前先扫输入，命中注入/越狱即拦截 + 审计 ──
+    verdict = guard.scan_input(body.transcript)
+    if verdict["blocked"]:
+        db.add(AuditLog(
+            user_id=encounter.provider_id,
+            action="blocked_prompt_injection",
+            entity_type="encounter",
+            entity_id=encounter.id,
+            details={"reasons": verdict["reasons"]},
+        ))
+        await db.commit()
+        raise HTTPException(400, "Input rejected: possible prompt injection detected.")
+
     encounter.transcript = body.transcript     # 先存转录，永不丢
     encounter.status = "generated"
 

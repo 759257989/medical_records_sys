@@ -19,6 +19,8 @@ from contextlib import contextmanager
 from app.core.config import settings
 from app.core.providers.base import Usage
 
+from app.core.security import phi
+
 log = logging.getLogger("obs")
 
 _ENABLED = bool(settings.langfuse_public_key and settings.langfuse_secret_key)
@@ -35,7 +37,15 @@ if _ENABLED:
     _client = get_client()
     log.info("Langfuse observability enabled → %s", settings.langfuse_host)
 
-
+def _safe(obj):
+    """写进 Langfuse 前擦 PHI(可用开关关掉)。"""
+    if not settings.phi_scrub_logs:
+        return obj
+    try:
+        return phi.scrub_obj(obj)
+    except Exception:
+        return obj          # 脱敏失败绝不能拖垮主流程
+    
 def _strmeta(meta: dict | None) -> dict | None:
     """propagate_attributes 的 metadata 要求值为字符串，这里统一转一下。"""
     return {k: str(v) for k, v in meta.items()} if meta else None
@@ -71,7 +81,7 @@ class _Root:
 
     def update_trace(self, **kw):
         # v4：trace 级 input/output 用 set_trace_io（v3 是 update_trace）。
-        self._obs.set_trace_io(**kw)
+        self._obs.set_trace_io(**{k: _safe(v) for k, v in kw.items()})
 
     def update(self, *a, **k):
         self._obs.update(*a, **k)
@@ -113,7 +123,7 @@ def trace(name: str, *, user_id=None, session_id=None, tags=None,
         user_id=user_id, session_id=session_id,
         tags=tags, metadata=_strmeta(metadata),
     ):
-        root_obs = _client.start_observation(name=name, as_type="span", input=input)
+        root_obs = _client.start_observation(name=name, as_type="span", input=_safe(input))
     root = _Root(root_obs)
     try:
         yield root                              # ← 流式 yield 发生在 propagate_attributes 之外
@@ -127,7 +137,7 @@ def span(name: str, *, input=None):
     if not _ENABLED:
         yield _NullCtx()
         return
-    sp = _client.start_observation(name=name, as_type="span", input=input)
+    sp = _client.start_observation(name=name, as_type="span", input=_safe(input))
     try:
         yield sp
     finally:
@@ -138,7 +148,7 @@ def span(name: str, *, input=None):
 def record_usage(gen, *, output, usage: Usage) -> None:
     """统一封装：把 output、token 用量、成本、实际模型写进 generation。"""
     gen.update(
-        output=output,
+        output=_safe(output),
         model=usage.model or None,
         usage_details={"input": usage.prompt_tokens, "output": usage.completion_tokens},
         # cost_details 用 v4 规范键 total；不传时 Langfuse 也会按 model+usage 自动估算。

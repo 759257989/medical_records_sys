@@ -1,4 +1,4 @@
-# app/core/security.py
+# app/core/security/auth.py
 from datetime import datetime, timedelta, timezone
 
 import bcrypt

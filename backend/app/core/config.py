@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     rate_limit_agent: str = "5/minute"       # agent 运行：更贵
     rate_limit_icd: str = "60/minute"        # ICD 检索：便宜，放宽
     rate_limit_login: str = "5/minute"       # 登录：按 IP，防爆破
+    
+    phi_scrub_logs: bool = True       # 写 trace/日志前是否擦 PHI(强烈建议 True)
+    phi_strict_mode: bool = False     # 是否"发给模型前去标识"(默认 False，保留姓名进 prompt)
 
 def _hydrate_from_secrets_manager() -> None:
     """生产环境：从 Secrets Manager 拉密钥并写入环境变量，
