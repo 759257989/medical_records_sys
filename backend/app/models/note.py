@@ -19,6 +19,7 @@ class NoteVersion(Base):
     __table_args__ = (UniqueConstraint("encounter_id", "version_no", name="uq_note_enc_ver"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)  # 主键，UUID v4
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)  # 多租户隔离键（RLS）
     encounter_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("encounters.id"), nullable=False)      # 归属的就诊记录
     version_no: Mapped[int] = mapped_column(Integer, nullable=False)   # 版本序号，从 1 开始递增；最大值为当前版本
     subjective: Mapped[str | None] = mapped_column(Text)   # S（主观）：患者主诉、症状描述
@@ -37,3 +38,4 @@ class NoteVersionCode(Base):
 
     note_version_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("note_versions.id"), primary_key=True)  # 关联的笔记版本
     icd10_code_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("icd10_codes.id"), primary_key=True)      # 关联的 ICD-10 诊断编码
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)    # 多租户隔离键（RLS）

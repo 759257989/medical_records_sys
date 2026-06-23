@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import (
     AsyncSession, async_sessionmaker, create_async_engine,
 )
 from app.core.config import settings
+from sqlalchemy import text
 
 # Engine：进程内只创建一次（模块在 import 时执行），它内部维护一个连接池
 engine = create_async_engine(
@@ -21,4 +22,7 @@ SessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=
 # FastAPI 依赖：每个请求进来借一个会话，结束后自动归还到池
 async def get_db():
     async with SessionLocal() as session:
+        # ★坑2：连接来自池，可能残留上个请求的 app.tenant_id。开局先清零 → fail closed，
+        #        随后 get_current_user 再设成本请求真正的租户。
+        await session.execute(text("SELECT set_config('app.tenant_id', '', false)"))
         yield session

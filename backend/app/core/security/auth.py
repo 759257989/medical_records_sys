@@ -21,8 +21,9 @@ def create_access_token(user) -> str:
     """为用户签发一个有时效的 JWT。"""
     expire = datetime.now(timezone.utc) + timedelta(hours=settings.jwt_expire_hours)
     payload = {
-        "sub": str(user.id),   # subject = 用户 id
-        "role": user.role,     # 角色，便于前端/中间件快速判断
-        "exp": expire,         # 过期时间（PyJWT 会自动校验）
+        "sub": str(user.id),            # subject = 用户 id
+        "role": user.role,              # 角色，便于前端/中间件快速判断
+        "tenant": str(user.tenant_id),  # 租户 id，供审计/网关层校验 + 设置 RLS 上下文
+        "exp": expire,                  # 过期时间（PyJWT 会自动校验）
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")

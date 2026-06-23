@@ -25,6 +25,9 @@ from app.models.model_routing import ModelRouting
 from app.schemas.admin import PromptVersionOut, ModelRoutingOut, ModelRoutingUpdate
 from app.api.deps import get_current_user
 
+from app.models.tenant import Tenant
+from app.api.deps import get_current_user
+
 # dependencies=[Depends(require_admin)] 让该 router 下每个端点都自动鉴权
 router = APIRouter(prefix="/api/admin", tags=["admin"], dependencies=[Depends(require_admin)])
 
@@ -34,6 +37,7 @@ def write_audit(db, admin: User, action: str, entity_type: str, entity_id, detai
     db.add(AuditLog(
         user_id=admin.id, action=action,
         entity_type=entity_type, entity_id=entity_id, details=details,
+        tenant_id=admin.tenant_id,
     ))
 
 
@@ -149,7 +153,7 @@ async def create_template(
     t = Template(
         name=body.name, encounter_type=body.encounter_type,
         system_prompt=body.system_prompt, is_active=body.is_active,
-        created_by=admin.id,
+        created_by=admin.id, tenant_id=admin.tenant_id,
     )
     db.add(t)
     await db.flush()
@@ -315,3 +319,24 @@ async def list_audit(db: AsyncSession = Depends(get_db)):
         }
         for (a, fn, ln) in rows
     ]
+   
+    
+@router.post("/tenants")
+async def provision_tenant(
+    body: dict,                                  # {"slug","name","admin_email","admin_password"}
+    admin: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    t = Tenant(slug=body["slug"], name=body["name"])
+    db.add(t); await db.flush()                  # 拿到 t.id
+    # 给新租户建一个管理员账号(密码哈希复用 security)
+    from app.core.security import hash_password
+    db.add(User(email=body["admin_email"].lower(), password_hash=hash_password(body["admin_password"]),
+                role="admin", first_name="Clinic", last_name="Admin", tenant_id=t.id))
+    # seed 几个默认模板到该租户(让新诊所开箱即用)
+    db.add(Template(name="General SOAP", encounter_type="general",
+                    system_prompt="You are an experienced clinical documentation specialist.",
+                    tenant_id=t.id))
+    write_audit(db, admin, "provision_tenant", "tenant", t.id, {"slug": t.slug})
+    await db.commit()
+    return {"id": str(t.id), "slug": t.slug}

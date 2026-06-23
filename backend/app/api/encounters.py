@@ -84,13 +84,17 @@ async def create_encounter(
     )
     is_returning = patient is not None
     if patient is None:
-        patient = Patient(first_name=body.first_name, last_name=body.last_name, dob=body.dob)
+        patient = Patient(
+            first_name=body.first_name, last_name=body.last_name, dob=body.dob,
+            tenant_id=user.tenant_id,
+        )
         db.add(patient)
         await db.flush()
 
     enc = Encounter(
         patient_id=patient.id, provider_id=user.id,
         template_id=body.template_id, status="draft",
+        tenant_id=user.tenant_id,
     )
     db.add(enc)
     await db.commit()
@@ -202,6 +206,7 @@ async def generate(
             entity_type="encounter",
             entity_id=encounter.id,
             details={"reasons": verdict["reasons"]},
+            tenant_id=encounter.tenant_id,
         ))
         await db.commit()
         raise HTTPException(400, "Input rejected: possible prompt injection detected.")
@@ -239,6 +244,7 @@ async def generate(
                     "provider_id": str(encounter.provider_id),
                     "encounter_id": str(encounter.id),
                     "model_arm": model_arm,                 # ← 进 trace，便于 A/B 归因
+                    "tenant_id": str(encounter.tenant_id),  # ← 成本归属：按租户看花费
                 },
                 prompt_version=prompt_version,              # ← 治理决策
                 primary_provider=primary_provider,          # ← 治理决策
@@ -269,6 +275,7 @@ async def save_note(
         encounter_id=encounter.id, version_no=next_v,
         subjective=body.subjective, objective=body.objective,
         assessment=body.assessment, plan=body.plan, created_by=user.id,
+        tenant_id=encounter.tenant_id,
     )
     db.add(nv)
     encounter.status = "finalized"

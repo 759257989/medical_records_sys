@@ -18,6 +18,8 @@ from app.core.db import get_db
 from app.models.encounter import Encounter
 from app.models.user import User
 
+from sqlalchemy import text
+
 # OAuth2PasswordBearer 是一个"令牌提取器"：
 # 它告诉 FastAPI 去请求头里找 "Authorization: Bearer <token>"，并把 token 字符串传给依赖它的函数。
 # tokenUrl 仅供 /docs 页面的「Authorize」按钮知道去哪里登录，不影响实际验证逻辑。
@@ -41,8 +43,12 @@ async def get_current_user(
     # 每次请求都查一次，确保账号被管理员停用后旧 token 立即失效（不用等 token 自然过期）
     user = await db.get(User, uuid.UUID(payload["sub"]))
     if user is None or not user.is_active:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="inactive_or_invalid")
-    return user  # 返回的 User 对象会被注入到路由函数的参数中
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid_token")
+
+    # 设定本请求的租户上下文 → 之后所有对 RLS 表的查询都只看得到这个租户
+    await db.execute(text("SELECT set_config('app.tenant_id', :t, false)"),
+                     {"t": str(user.tenant_id)})
+    return user
 
 
 def require_admin(user: User = Depends(get_current_user)) -> User:

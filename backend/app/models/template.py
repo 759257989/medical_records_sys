@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -13,6 +13,7 @@ class Template(Base):
     __tablename__ = "templates"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)  # 主键，UUID v4 随机生成
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)  # 多租户隔离键（RLS）
     name: Mapped[str] = mapped_column(String(150), nullable=False)                                    # 模板名称，最长 150 字符
     encounter_type: Mapped[str | None] = mapped_column(String(100))                                   # 就诊类型（如门诊/急诊），可为空
     system_prompt: Mapped[str] = mapped_column(Text, nullable=False)                                  # 发给 LLM 的系统提示词，决定生成病历的风格与格式

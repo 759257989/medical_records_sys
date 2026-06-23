@@ -108,10 +108,13 @@ async def generate_soap_stream(
         "generate_soap",
         user_id=trace_meta.get("provider_id"),
         session_id=trace_meta.get("encounter_id"),
-        # tags 里带上 版本 和 arm —— Phase 1 的 Langfuse 里就能按它们分组对比 A/B
-        tags=["soap", prompt_version or settings.prompt_version, trace_meta.get("model_arm", "champion")],
+        # tags 里带上 版本、arm 和 租户 —— Langfuse 里就能按它们分组对比 A/B、按租户算成本
+        tags=["soap", prompt_version or settings.prompt_version,
+              trace_meta.get("model_arm", "champion"),
+              f"tenant:{trace_meta.get('tenant_id', '-')}"],   # ← 成本归属维度
         metadata={"prompt_version": prompt_version or settings.prompt_version,
-                  "model_arm": trace_meta.get("model_arm"), "has_history": has_history},
+                  "model_arm": trace_meta.get("model_arm"), "has_history": has_history,
+                  "tenant_id": trace_meta.get("tenant_id")},
         input={"transcript": transcript[:1000]},
     ) as root:
 

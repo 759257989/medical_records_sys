@@ -16,7 +16,8 @@ def user_or_ip_key(request: Request) -> str:
         token = auth[7:]
         try:
             payload = jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
-            return f"user:{payload['sub']}"        # 与签发时一致：sub = 用户 id
+            # 多租户：按 租户+用户 分桶 —— 一个诊所打爆自己的额度，不殃及别家(噪声邻居隔离)
+            return f"tenant:{payload.get('tenant', '-')}:user:{payload['sub']}"
         except Exception:                           # 过期/篡改/格式错 → 退回按 IP
             pass
     return f"ip:{get_remote_address(request)}"

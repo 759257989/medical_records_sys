@@ -16,6 +16,9 @@ PROVIDERS = [
 ]
 ADMIN = ("admin@clinic.example.com", "Admin123!", "Alice", "Admin")
 
+# 迁移 1ff3124nfae3 已创建的 default 租户，种子数据全部归到它名下
+DEFAULT_TENANT_ID = "00000000-0000-0000-0000-000000000001"
+
 TEMPLATES = [
     ("General SOAP", "general",
      "You are an experienced clinical documentation specialist. Produce a concise, "
@@ -44,6 +47,7 @@ async def main() -> None:
                 role=role,
                 first_name=first,
                 last_name=last,
+                tenant_id=DEFAULT_TENANT_ID,
             ))
         await db.commit()
 
@@ -59,6 +63,7 @@ async def main() -> None:
             db.add(Template(
                 name=name, encounter_type=etype,
                 system_prompt=prompt, created_by=admin.id if admin else None,
+                tenant_id=DEFAULT_TENANT_ID,
             ))
         await db.commit()
 

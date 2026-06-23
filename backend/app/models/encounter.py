@@ -17,6 +17,7 @@ class Encounter(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)  # 主键，UUID v4
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False, index=True)  # 多租户隔离键（RLS）
     patient_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("patients.id"), nullable=False)          # 关联的患者
     provider_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)            # 负责本次就诊的医生/提供者
     template_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("templates.id", ondelete="SET NULL"))  # 使用的笔记模板；模板被删后置 NULL，不影响历史记录
