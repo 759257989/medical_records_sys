@@ -1,6 +1,8 @@
 # app/api/encounters.py
 import json
+import uuid
 
+from backend.app.models.feedback import NoteFeedback
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
@@ -308,3 +310,14 @@ async def list_notes(
         }
         for (nv, fn, ln) in rows
     ]
+    
+    
+@router.post("/{encounter_id}/feedback")
+async def submit_feedback(
+    encounter_id: uuid.UUID, body: dict,
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    db.add(NoteFeedback(encounter_id=encounter_id, rating=int(body.get("rating", 0)),
+                        signal=body.get("signal"), created_by=user.id, tenant_id=user.tenant_id))
+    await db.commit()
+    return {"ok": True}
